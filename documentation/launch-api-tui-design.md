@@ -179,16 +179,28 @@ async fn should_sync(&self) -> bool {
 
 ### File Structure
 
+The application follows XDG Base Directory conventions, separating user
+configuration from cache data. The `directories` crate's `ProjectDirs`
+provides platform-appropriate paths:
+
+| Platform | Config (`config_dir`) | Cache (`cache_dir`) |
+|----------|----------------------|---------------------|
+| Linux | `~/.config/launch-client/` | `~/.cache/launch-client/` |
+| macOS | `~/Library/Application Support/launch-client/` | `~/Library/Caches/launch-client/` |
+| Windows | `{FOLDERID_RoamingAppData}\launch-client\` | `{FOLDERID_LocalAppData}\launch-client\cache\` |
+
 ```
-~/.config/launch-client/
-├── app_state.json       # Rate limits, app metadata, startup count
-├── cache.json           # Cached list of launches
-├── details/             # Individual launch detail caches
-│   ├── e3df2ecd-c239-472f-95e4-2b89b4f75800.json
-│   ├── a1b2c3d4-e5f6-7890-abcd-ef1234567890.json
-│   └── ...
-├── config.toml          # User configuration
-└── app.log              # Application log file
+~/.config/launch-client/       (config_dir)
+├── config.toml                # User configuration
+└── app.log                    # Application log file
+
+~/.cache/launch-client/        (cache_dir)
+├── app_state.json             # Rate limits, app metadata, startup count
+├── cache.json                 # Cached list of launches
+└── details/                   # Individual launch detail caches
+    ├── e3df2ecd-c239-472f-95e4-2b89b4f75800.json
+    ├── a1b2c3d4-e5f6-7890-abcd-ef1234567890.json
+    └── ...
 ```
 
 ### Cache Files
@@ -477,6 +489,9 @@ The help overlay is context-aware, showing different content depending on the cu
 │  ?         Toggle this help        │
 │  q         Quit application        │
 │                                     │
+│  Tip: Create config.toml in your   │
+│  config directory to customize.    │
+│                                     │
 │  Press ? or Esc to close           │
 ╰─────────────────────────────────────╯
 ```
@@ -694,7 +709,7 @@ Home/End  - Jump to first/last item in list
 
 ### Configuration File: `config.toml`
 
-Located at: `~/.config/launch-client/config.toml`
+Located at: `<config_dir>/config.toml` (see §File Structure for platform paths)
 
 ```toml
 [api]
@@ -737,7 +752,7 @@ launches_per_page = 25     # Options: 10, 25, 50
 [log]
 # Log level: "error", "warn", "info", "debug", "trace"
 level = "warn"
-# Log file name (stored in ~/.config/launch-client/)
+# Log file name (stored in config_dir)
 file = "app.log"
 ```
 
@@ -960,7 +975,7 @@ On first launch with no cache and no config file:
 2. If the fetch succeeds, render the list view normally
 3. If the fetch fails (offline, rate limited), display the appropriate error message (see Error Handling section)
 
-The config directory (`~/.config/launch-client/`) and `app_state.json` are created automatically on first run. The `config.toml` is not auto-created.
+The config directory (`config_dir`) and cache directory (`cache_dir`) are created automatically on first run. The `config.toml` is not auto-created.
 
 ---
 
@@ -969,7 +984,7 @@ The config directory (`~/.config/launch-client/`) and `app_state.json` are creat
 ### Startup Sequence
 
 1. **Initialize cache manager**
-   - Create config directory if it doesn't exist
+   - Create config and cache directories if they don't exist
    - Load or create `app_state.json`
    - Load `cache.json` if it exists
    - Load `config.toml` if it exists
@@ -1040,7 +1055,8 @@ if user_pressed_refresh && self.can_refresh(current_view) {
 
 ```rust
 struct CacheManager {
-    base_path: PathBuf,
+    config_dir: PathBuf,
+    cache_dir: PathBuf,
     app_state: AppState,
     launch_list: Option<LaunchListCache>,
     config: Config,
@@ -1135,7 +1151,7 @@ struct MissionSummary {
 
 Logging uses the `tracing` crate (the Rust ecosystem standard, integrates well with tokio's async runtime).
 
-- **Log file**: `~/.config/launch-client/app.log`
+- **Log file**: `<config_dir>/app.log`
 - **Default level**: `WARN` (configurable in `config.toml`)
 - **Rotation**: Truncate log file at 1MB on app startup
 
@@ -1285,7 +1301,7 @@ Logging uses the `tracing` crate (the Rust ecosystem standard, integrates well w
 - With and without API key
 - Offline behavior (no network, partial network)
 - Terminal resize (below minimum, resize during use, responsive layout threshold at 100 columns)
-- First run with no config directory
+- First run with no config/cache directories
 
 ---
 

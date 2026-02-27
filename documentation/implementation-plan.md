@@ -62,7 +62,7 @@ serde round-trip on example JSON payloads from the design doc,
 
 ### Step 1.3 — Configuration loading
 
-Implement `config.toml` parsing with defaults and the config directory setup.
+Implement `config.toml` parsing with defaults and directory setup.
 
 **Produce:**
 - `src/config/mod.rs`: `Config` struct with serde `Deserialize`, matching
@@ -72,7 +72,8 @@ Implement `config.toml` parsing with defaults and the config directory setup.
 - `load_config()` function: reads `config.toml` from the platform config
   directory (`directories` crate), falls back to defaults on missing/invalid
   file, logs warnings on parse failures
-- Config directory creation logic (`~/.config/launch-client/`)
+- Directory creation logic for both `config_dir` and `cache_dir`
+  (design doc §File Structure)
 
 **Acceptance criteria:** `cargo test` passes. Tests cover: missing file →
 defaults, valid file → parsed values, partial file → defaults for missing
@@ -86,7 +87,7 @@ Initialise `tracing` with file output.
 
 **Produce:**
 - `src/logging.rs` (or within `main.rs`): `init_logging()` function
-- Writes to `~/.config/launch-client/app.log`
+- Writes to `<config_dir>/app.log` (design doc §File Structure)
 - Default level WARN, configurable via `Config`
 - Log file truncated at 1 MB on startup (design doc §Logging)
 
@@ -471,7 +472,7 @@ edge cases.
   cache expiry boundaries (design doc §Testing Strategy — Edge Case Tests)
 - Manual testing checklist: Linux/macOS/Windows, with/without API key,
   offline behaviour, terminal resize (including responsive layout threshold
-  at 100 columns), first run with no config directory
+  at 100 columns), first run with no config/cache directories
   (design doc §Testing Strategy — Manual Testing)
 
 **Acceptance criteria:** `cargo test` passes. All scenarios from the design
