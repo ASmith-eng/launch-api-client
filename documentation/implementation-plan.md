@@ -92,7 +92,7 @@ directories including `details/` subdirectory.
 
 ---
 
-### Step 1.4 — Logging setup
+### Step 1.4 — Logging setup ✅
 
 Initialise `tracing` with file output.
 
@@ -104,6 +104,10 @@ Initialise `tracing` with file output.
 
 **Acceptance criteria:** `cargo run` creates log file. Setting log level to
 `debug` in config produces debug output in the log file.
+
+**Status:** Complete. 4 new tests (39 total). `src/logging.rs` with
+`init_logging()`, 1 MB truncation on startup, configurable level via
+`LogConfig`. `main.rs` wired up: resolves dirs, loads config, inits logging.
 
 ---
 
