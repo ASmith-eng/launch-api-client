@@ -9,7 +9,7 @@ the previous one. Steps reference specific sections of the
 
 ## Phase 1: Project Scaffolding & Core Types
 
-### Step 1.1 — Project initialisation
+### Step 1.1 — Project initialisation ✅
 
 Set up the Rust project skeleton with all dependencies and the module tree
 from the design doc.
@@ -28,9 +28,11 @@ from the design doc.
 
 **Acceptance criteria:** `cargo check` passes with no errors.
 
+**Status:** Complete. `cargo check` passes. All modules wired up.
+
 ---
 
-### Step 1.2 — Data models and vendor types
+### Step 1.2 — Data models and vendor types ✅
 
 Implement all core structs and the vendor-specific LL2 response models.
 
@@ -58,9 +60,13 @@ Implement all core structs and the vendor-specific LL2 response models.
 serde round-trip on example JSON payloads from the design doc,
 `AppError::is_retryable()` returns correct results for each variant.
 
+**Status:** Complete. 27 tests passing. All domain types, vendor models,
+status map, region map, conversions, Clock trait, AppError, and ErrorState
+implemented. clippy clean (only dead-code warnings from unused-yet pub items).
+
 ---
 
-### Step 1.3 — Configuration loading
+### Step 1.3 — Configuration loading ✅
 
 Implement `config.toml` parsing with defaults and directory setup.
 
@@ -78,6 +84,11 @@ Implement `config.toml` parsing with defaults and directory setup.
 **Acceptance criteria:** `cargo test` passes. Tests cover: missing file →
 defaults, valid file → parsed values, partial file → defaults for missing
 keys, invalid values → defaults with warning.
+
+**Status:** Complete. 8 new tests (35 total). Config struct with 4 sections
+(api, cache, ui, log), all `#[serde(default)]`. `load_config()` handles
+missing/invalid/partial files. `AppDirs` resolves platform paths and creates
+directories including `details/` subdirectory.
 
 ---
 
