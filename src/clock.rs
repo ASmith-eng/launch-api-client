@@ -22,18 +22,21 @@ impl Clock for SystemClock {
 pub mod testing {
     use super::*;
     use chrono::TimeDelta;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     /// Test clock with manually controlled time.
-    #[derive(Debug)]
+    ///
+    /// Uses `Arc<Mutex>` internally so clones share the same time — advance
+    /// one and all clones see the new value.
+    #[derive(Debug, Clone)]
     pub struct FakeClock {
-        now: Mutex<DateTime<Utc>>,
+        now: Arc<Mutex<DateTime<Utc>>>,
     }
 
     impl FakeClock {
         pub fn new(start: DateTime<Utc>) -> Self {
             Self {
-                now: Mutex::new(start),
+                now: Arc::new(Mutex::new(start)),
             }
         }
 

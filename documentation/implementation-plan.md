@@ -113,7 +113,7 @@ Initialise `tracing` with file output.
 
 ## Phase 2: Cache & Rate Limiting
 
-### Step 2.1 — Cache manager (read/write)
+### Step 2.1 — Cache manager (read/write) ✅
 
 Implement the file-based cache system for app state, launch list, and
 launch details.
@@ -133,9 +133,15 @@ then read round-trips for all three cache types, missing files return `None`,
 corrupt files return `Err` or `None` gracefully, version mismatch returns
 `None` (treated as cache miss).
 
+**Status:** Complete. 22 new tests (57 total). `CacheManager` with 6 public
+methods (load/save for app_state, launch_list, launch_detail). Generic
+`load_versioned<T>()` via `HasVersion` trait. Atomic writes (`.tmp` + rename).
+Version mismatch → `Ok(None)` with DEBUG log; corrupt files → `Ok(None)` with
+WARN log. clippy clean (only pre-existing dead-code warnings).
+
 ---
 
-### Step 2.2 — Cache TTL and expiry logic
+### Step 2.2 — Cache TTL and expiry logic ✅
 
 Add TTL calculation based on launch proximity and cache staleness checks.
 
@@ -153,9 +159,17 @@ cover all five TTL tiers. Tests for edge cases: launch exactly 7 days away,
 exactly 24 hours away, in-flight status, past launches. Time is advanced
 via `FakeClock` — no wall-clock sleeps.
 
+**Status:** Complete. 34 new tests (91 total). `CacheStrategy` enum with 5
+tiers (Permanent/LongTerm/MediumTerm/ShortTerm/RealTime), `for_launch()`
+determination by status ID + proximity, `ttl_minutes()` driven by CacheConfig,
+`compute_expires_at()` and `list_expires_at()` helpers, `is_stale(now)` on both
+cache types, `CacheManager<C: Clock>` generic. `FakeClock` updated to
+`Arc<Mutex>` for cloneable shared time. All boundary tests covered. clippy
+clean.
+
 ---
 
-### Step 2.3 — Cache pruning
+### Step 2.3 — Cache pruning ✅
 
 Implement detail cache cleanup on startup.
 
@@ -168,6 +182,22 @@ Implement detail cache cleanup on startup.
 **Acceptance criteria:** Unit tests with a temp directory: create N+1 dummy
 detail files, verify oldest are pruned to N. Verify age-based pruning
 deletes old files.
+
+**Status:** Complete. 28 new tests (123 total). `prune_details()` on
+CacheManager: age-based deletion (files with `fetched_at` older than
+`max_detail_age_days`), then count-based (oldest by `fetched_at` removed until
+within `max_detail_files`). Corrupt files cleaned up during pruning.
+`should_prune(startup_count, config)` helper for startup-count gating.
+`read_fetched_at()` uses serde_json::Value for lightweight partial parsing.
+Also added `Config::sanitize()` — defensive validation of all config fields
+after deserialization (zero TTLs, invalid URLs, path traversal in log filename,
+invalid enum-like strings, out-of-range numeric values). Removed
+`ttl_past_launches` from config (past launches use internal `Permanent`
+strategy — data is final, no re-fetch needed). Added max caps: TTL fields
+capped at 43 200 min (30 days), `prune_every_n_startups` capped at 50.
+Design document updated with sanitisation table and revised config example.
+Tests cover age/count/combined pruning, boundary conditions, corrupt files,
+missing dir, non-.json skipping, FakeClock advancement, max-cap validation.
 
 ---
 

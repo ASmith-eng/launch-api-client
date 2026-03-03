@@ -37,26 +37,27 @@ pub struct ApiConfig {
 }
 
 /// Cache TTL and pruning settings.
+///
+/// Past launches use a `Permanent` cache strategy internally (data is final
+/// and never re-fetched), so no TTL config is exposed for them.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CacheConfig {
-    /// TTL for past launches in minutes (0 = never expires).
-    pub ttl_past_launches: u64,
-    /// TTL for launches >7 days away (minutes).
+    /// TTL for launches >7 days away (minutes). Range: 1–43 200 (30 days).
     pub ttl_far_future: u64,
-    /// TTL for launches 1–7 days away (minutes).
+    /// TTL for launches 1–7 days away (minutes). Range: 1–43 200 (30 days).
     pub ttl_near_future: u64,
-    /// TTL for launches <24 hours away (minutes).
+    /// TTL for launches <24 hours away (minutes). Range: 1–43 200 (30 days).
     pub ttl_imminent: u64,
-    /// TTL for in-progress launches (minutes).
+    /// TTL for in-progress launches (minutes). Range: 1–43 200 (30 days).
     pub ttl_active: u64,
-    /// TTL for the launch list (minutes).
+    /// TTL for the launch list (minutes). Range: 1–43 200 (30 days).
     pub ttl_launch_list: u64,
-    /// Delete detail cache files older than this many days.
+    /// Delete detail cache files older than this many days. Min: 1.
     pub max_detail_age_days: u32,
-    /// Maximum number of detail cache files to keep.
+    /// Maximum number of detail cache files to keep. Min: 1.
     pub max_detail_files: u32,
-    /// Run cache pruning every N app startups.
+    /// Run cache pruning every N app startups. Range: 1–50.
     pub prune_every_n_startups: u32,
 }
 
@@ -109,7 +110,6 @@ impl Default for ApiConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            ttl_past_launches: 0,
             ttl_far_future: 1440,
             ttl_near_future: 180,
             ttl_imminent: 30,
@@ -138,6 +138,183 @@ impl Default for LogConfig {
             level: "warn".into(),
             file: "app.log".into(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sanitisation
+// ---------------------------------------------------------------------------
+
+const VALID_TIME_FORMATS: &[&str] = &["12h", "24h"];
+const VALID_STALENESS_STYLES: &[&str] = &["relative", "absolute"];
+const VALID_LOG_LEVELS: &[&str] = &["error", "warn", "info", "debug", "trace"];
+const MAX_LAUNCHES_PER_PAGE: u32 = 100;
+/// 30 days in minutes — upper bound for all TTL fields.
+const MAX_TTL_MINUTES: u64 = 43_200;
+/// Upper bound for prune_every_n_startups.
+const MAX_PRUNE_STARTUPS: u32 = 50;
+
+impl Config {
+    /// Replace invalid or dangerous values with safe defaults.
+    ///
+    /// Called after deserialization so that well-typed but semantically wrong
+    /// values (e.g. `prune_every_n_startups = 0`, path traversal in log file
+    /// name) don't cause surprising behaviour at runtime.
+    pub fn sanitize(&mut self) {
+        self.api.sanitize();
+        self.cache.sanitize();
+        self.ui.sanitize();
+        self.log.sanitize();
+    }
+}
+
+impl ApiConfig {
+    fn sanitize(&mut self) {
+        let defaults = Self::default();
+        if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
+            warn!(
+                value = %self.base_url,
+                default = %defaults.base_url,
+                "Invalid base_url (must be http/https), using default"
+            );
+            self.base_url = defaults.base_url;
+        }
+    }
+}
+
+impl CacheConfig {
+    fn sanitize(&mut self) {
+        let defaults = Self::default();
+
+        // TTL values: must be 1–43 200 (30 days)
+        sanitize_range("ttl_far_future", &mut self.ttl_far_future, 1, MAX_TTL_MINUTES, defaults.ttl_far_future);
+        sanitize_range("ttl_near_future", &mut self.ttl_near_future, 1, MAX_TTL_MINUTES, defaults.ttl_near_future);
+        sanitize_range("ttl_imminent", &mut self.ttl_imminent, 1, MAX_TTL_MINUTES, defaults.ttl_imminent);
+        sanitize_range("ttl_active", &mut self.ttl_active, 1, MAX_TTL_MINUTES, defaults.ttl_active);
+        sanitize_range("ttl_launch_list", &mut self.ttl_launch_list, 1, MAX_TTL_MINUTES, defaults.ttl_launch_list);
+
+        // Pruning: age and count have a minimum of 1, no enforced max
+        sanitize_min_u32(
+            "max_detail_age_days",
+            &mut self.max_detail_age_days,
+            1,
+            defaults.max_detail_age_days,
+        );
+        sanitize_min_u32(
+            "max_detail_files",
+            &mut self.max_detail_files,
+            1,
+            defaults.max_detail_files,
+        );
+        // Prune frequency: 1–50
+        sanitize_range_u32(
+            "prune_every_n_startups",
+            &mut self.prune_every_n_startups,
+            1,
+            MAX_PRUNE_STARTUPS,
+            defaults.prune_every_n_startups,
+        );
+    }
+}
+
+impl UiConfig {
+    fn sanitize(&mut self) {
+        let defaults = Self::default();
+
+        if !VALID_TIME_FORMATS.contains(&self.time_format.as_str()) {
+            warn!(
+                value = %self.time_format,
+                "Invalid time_format (expected 12h or 24h), using default"
+            );
+            self.time_format = defaults.time_format;
+        }
+
+        if !VALID_STALENESS_STYLES.contains(&self.staleness_style.as_str()) {
+            warn!(
+                value = %self.staleness_style,
+                "Invalid staleness_style (expected relative or absolute), using default"
+            );
+            self.staleness_style = defaults.staleness_style;
+        }
+
+        if self.launches_per_page == 0 || self.launches_per_page > MAX_LAUNCHES_PER_PAGE {
+            warn!(
+                value = self.launches_per_page,
+                default = defaults.launches_per_page,
+                "Invalid launches_per_page (must be 1–{MAX_LAUNCHES_PER_PAGE}), using default"
+            );
+            self.launches_per_page = defaults.launches_per_page;
+        }
+    }
+}
+
+impl LogConfig {
+    fn sanitize(&mut self) {
+        let defaults = Self::default();
+
+        if !VALID_LOG_LEVELS.contains(&self.level.as_str()) {
+            warn!(
+                value = %self.level,
+                "Invalid log level, using default"
+            );
+            self.level = defaults.level;
+        }
+
+        // Guard against path traversal in log file name
+        if self.file.contains('/')
+            || self.file.contains('\\')
+            || self.file.contains("..")
+            || self.file.is_empty()
+        {
+            warn!(
+                value = %self.file,
+                "Invalid log file name (must be a plain filename), using default"
+            );
+            self.file = defaults.file;
+        }
+    }
+}
+
+/// Replace a `u64` field with its default if outside [min, max].
+fn sanitize_range(name: &str, value: &mut u64, min: u64, max: u64, default: u64) {
+    if *value < min || *value > max {
+        warn!(
+            field = name,
+            value = *value,
+            min,
+            max,
+            default,
+            "Config value out of range, using default"
+        );
+        *value = default;
+    }
+}
+
+/// Replace a `u32` field with its default if below a minimum.
+fn sanitize_min_u32(name: &str, value: &mut u32, min: u32, default: u32) {
+    if *value < min {
+        warn!(
+            field = name,
+            value = *value,
+            default,
+            "Config value below minimum, using default"
+        );
+        *value = default;
+    }
+}
+
+/// Replace a `u32` field with its default if outside [min, max].
+fn sanitize_range_u32(name: &str, value: &mut u32, min: u32, max: u32, default: u32) {
+    if *value < min || *value > max {
+        warn!(
+            field = name,
+            value = *value,
+            min,
+            max,
+            default,
+            "Config value out of range, using default"
+        );
+        *value = default;
     }
 }
 
@@ -186,7 +363,7 @@ impl AppDirs {
 /// - If the file is partially filled, missing keys use their defaults
 ///   (thanks to `#[serde(default)]` on every struct).
 pub fn load_config(path: &Path) -> Config {
-    match std::fs::read_to_string(path) {
+    let mut config = match std::fs::read_to_string(path) {
         Ok(contents) => match toml::from_str::<Config>(&contents) {
             Ok(config) => config,
             Err(e) => {
@@ -207,7 +384,9 @@ pub fn load_config(path: &Path) -> Config {
             );
             Config::default()
         }
-    }
+    };
+    config.sanitize();
+    config
 }
 
 #[cfg(test)]
@@ -335,6 +514,332 @@ ttl_far_future = "not a number"
         let config = load_config(&path);
         assert_eq!(config.cache.ttl_far_future, 1440);
     }
+
+    // =================================================================
+    // Sanitisation tests
+    // =================================================================
+
+    #[test]
+    fn sanitize_zero_ttl_values_reset_to_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+ttl_far_future = 0
+ttl_near_future = 0
+ttl_imminent = 0
+ttl_active = 0
+ttl_launch_list = 0
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        let defaults = CacheConfig::default();
+        assert_eq!(config.cache.ttl_far_future, defaults.ttl_far_future);
+        assert_eq!(config.cache.ttl_near_future, defaults.ttl_near_future);
+        assert_eq!(config.cache.ttl_imminent, defaults.ttl_imminent);
+        assert_eq!(config.cache.ttl_active, defaults.ttl_active);
+        assert_eq!(config.cache.ttl_launch_list, defaults.ttl_launch_list);
+    }
+
+    #[test]
+    fn sanitize_ttl_over_max_reset_to_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+ttl_far_future = 99999
+ttl_near_future = 50000
+ttl_launch_list = 43201
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        let defaults = CacheConfig::default();
+        assert_eq!(config.cache.ttl_far_future, defaults.ttl_far_future);
+        assert_eq!(config.cache.ttl_near_future, defaults.ttl_near_future);
+        assert_eq!(config.cache.ttl_launch_list, defaults.ttl_launch_list);
+    }
+
+    #[test]
+    fn sanitize_ttl_at_max_boundary_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+ttl_far_future = 43200
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.cache.ttl_far_future, 43200);
+    }
+
+    #[test]
+    fn sanitize_prune_startups_over_max_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+prune_every_n_startups = 51
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.cache.prune_every_n_startups, CacheConfig::default().prune_every_n_startups);
+    }
+
+    #[test]
+    fn sanitize_prune_startups_at_max_boundary_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+prune_every_n_startups = 50
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.cache.prune_every_n_startups, 50);
+    }
+
+    #[test]
+    fn sanitize_zero_pruning_values_reset_to_defaults() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+prune_every_n_startups = 0
+max_detail_files = 0
+max_detail_age_days = 0
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        let defaults = CacheConfig::default();
+        assert_eq!(config.cache.prune_every_n_startups, defaults.prune_every_n_startups);
+        assert_eq!(config.cache.max_detail_files, defaults.max_detail_files);
+        assert_eq!(config.cache.max_detail_age_days, defaults.max_detail_age_days);
+    }
+
+    #[test]
+    fn sanitize_valid_ttl_values_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[cache]
+ttl_far_future = 720
+ttl_near_future = 60
+ttl_imminent = 10
+ttl_active = 2
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.cache.ttl_far_future, 720);
+        assert_eq!(config.cache.ttl_near_future, 60);
+        assert_eq!(config.cache.ttl_imminent, 10);
+        assert_eq!(config.cache.ttl_active, 2);
+    }
+
+    #[test]
+    fn sanitize_invalid_base_url_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[api]
+base_url = "ftp://evil.example.com"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.api.base_url, ApiConfig::default().base_url);
+    }
+
+    #[test]
+    fn sanitize_valid_https_url_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[api]
+base_url = "https://ll.thespacedevs.com/2.3.0"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.api.base_url, "https://ll.thespacedevs.com/2.3.0");
+    }
+
+    #[test]
+    fn sanitize_invalid_time_format_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[ui]
+time_format = "25h"
+staleness_style = "funky"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.ui.time_format, "12h");
+        assert_eq!(config.ui.staleness_style, "relative");
+    }
+
+    #[test]
+    fn sanitize_launches_per_page_zero_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[ui]
+launches_per_page = 0
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.ui.launches_per_page, 25);
+    }
+
+    #[test]
+    fn sanitize_launches_per_page_over_max_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[ui]
+launches_per_page = 500
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.ui.launches_per_page, 25);
+    }
+
+    #[test]
+    fn sanitize_invalid_log_level_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[log]
+level = "verbose"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.log.level, "warn");
+    }
+
+    #[test]
+    fn sanitize_log_file_path_traversal_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[log]
+file = "../../../etc/passwd"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.log.file, "app.log");
+    }
+
+    #[test]
+    fn sanitize_log_file_with_slashes_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[log]
+file = "/tmp/evil.log"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.log.file, "app.log");
+    }
+
+    #[test]
+    fn sanitize_empty_log_file_reset_to_default() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[log]
+file = ""
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.log.file, "app.log");
+    }
+
+    #[test]
+    fn sanitize_valid_log_config_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            r#"
+[log]
+level = "debug"
+file = "my-app.log"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(&path);
+        assert_eq!(config.log.level, "debug");
+        assert_eq!(config.log.file, "my-app.log");
+    }
+
+    // =================================================================
+    // Directory tests
+    // =================================================================
 
     #[test]
     fn ensure_dirs_creates_directories() {

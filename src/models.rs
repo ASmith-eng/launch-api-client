@@ -94,6 +94,13 @@ pub struct LaunchListCache {
     pub launches: Vec<LaunchSummary>,
 }
 
+impl LaunchListCache {
+    /// Whether this cache entry has expired at the given time.
+    pub fn is_stale(&self, now: DateTime<Utc>) -> bool {
+        now >= self.expires_at
+    }
+}
+
 /// Cached launch detail with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchDetailCache {
@@ -103,6 +110,13 @@ pub struct LaunchDetailCache {
     pub expires_at: DateTime<Utc>,
     pub ttl_strategy: String,
     pub data: serde_json::Value,
+}
+
+impl LaunchDetailCache {
+    /// Whether this cache entry has expired at the given time.
+    pub fn is_stale(&self, now: DateTime<Utc>) -> bool {
+        now >= self.expires_at
+    }
 }
 
 /// Persistent application state saved across sessions.

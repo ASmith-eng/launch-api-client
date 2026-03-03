@@ -317,13 +317,15 @@ enum CacheStrategy {
 }
 ```
 
-**Default TTL Values** (minutes):
-- `ttl_past_launches`: 0 (never expires)
+**Default TTL Values** (minutes, configurable range: 1–43 200):
 - `ttl_far_future`: 1440 (24 hours)
 - `ttl_near_future`: 180 (3 hours)
 - `ttl_imminent`: 30 (30 minutes)
 - `ttl_active`: 1 (1 minute)
 - `ttl_launch_list`: 30 (30 minutes)
+
+> **Note:** Past launches use the `Permanent` strategy internally — their data is
+> final and never re-fetched. No TTL configuration is exposed for this tier.
 
 ### Cache Pruning
 
@@ -724,18 +726,18 @@ api_key = ""
 base_url = "https://lldev.thespacedevs.com/2.3.0"
 
 [cache]
-# Time-to-live based on launch proximity (in minutes)
-ttl_past_launches = 0      # Never expires (data is final)
+# Time-to-live based on launch proximity (in minutes, range: 1–43200)
+# Past launches are cached permanently (data is final) — no config needed.
 ttl_far_future = 1440      # 24 hours for launches >7 days away
-ttl_near_future = 180       # 3 hour for launches 1-7 days away
+ttl_near_future = 180       # 3 hours for launches 1-7 days away
 ttl_imminent = 30           # 30 minutes for launches <24 hours away
 ttl_active = 1             # 1 minute for in-progress launches
 ttl_launch_list = 30       # 30 minutes for launch list
 
 # Cache pruning settings
-max_detail_age_days = 30   # Delete detail files older than this
-max_detail_files = 100     # Keep at most this many detail files
-prune_every_n_startups = 5 # Run pruning every N app startups
+max_detail_age_days = 30   # Delete detail files older than this (min: 1)
+max_detail_files = 100     # Keep at most this many detail files (min: 1)
+prune_every_n_startups = 5 # Run pruning every N app startups (range: 1–50)
 
 [ui]
 # Timestamp format for "next refresh" time
@@ -761,9 +763,27 @@ file = "app.log"
 - Configuration file is **optional** - app works with sensible defaults
 - If config file doesn't exist, it is **not** automatically created
 - Users can create config file manually to customize behavior
-- Invalid config values fall back to defaults with warning logged
+- Missing keys keep their defaults (via `#[serde(default)]` on all structs)
+- Unknown keys are silently ignored (forward-compatible with newer config files)
 - Rate limit settings are **not** configurable (enforced by API provider)
 - The `toml` crate with `serde` is used for parsing (TOML is the idiomatic config format in the Rust ecosystem and supports comments, unlike JSON)
+
+#### Defensive Sanitisation
+
+After deserialization, `Config::sanitize()` validates every field and replaces out-of-range or dangerous values with safe defaults (logging a warning for each):
+
+| Field | Valid range | Notes |
+|---|---|---|
+| `ttl_*` (all TTL fields) | 1–43 200 minutes | 30 day upper bound prevents stale-forever data |
+| `prune_every_n_startups` | 1–50 | 0 would disable pruning; >50 is unreasonable |
+| `max_detail_age_days` | ≥ 1 | 0 would prune everything immediately |
+| `max_detail_files` | ≥ 1 | 0 would prune everything immediately |
+| `base_url` | Must start with `http://` or `https://` | Prevents non-HTTP schemes |
+| `time_format` | `"12h"` or `"24h"` | — |
+| `staleness_style` | `"relative"` or `"absolute"` | — |
+| `launches_per_page` | 1–100 | — |
+| `log.level` | `"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"` | — |
+| `log.file` | Plain filename (no `/`, `\`, `..`, or empty) | Prevents path traversal |
 
 ---
 
