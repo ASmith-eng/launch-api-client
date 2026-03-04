@@ -201,7 +201,7 @@ missing dir, non-.json skipping, FakeClock advancement, max-cap validation.
 
 ---
 
-### Step 2.4 — Rate limiter
+### Step 2.4 — Rate limiter ✅
 
 Implement client-side rate limit tracking.
 
@@ -221,7 +221,27 @@ by 1 hour to verify), `remaining()` returns correct count,
 `should_sync()` triggers under specified conditions, `next_available_at()`
 returns correct time. No wall-clock sleeps.
 
+**Status:** Complete. 21 new tests (143 total). `RateLimiter<C: Clock>` with
+rolling-window `VecDeque<DateTime<Utc>>`, 1-hour window, 15/30 request limits.
+Methods: `can_make_request()`, `record_request()`, `remaining()`, `limit()`,
+`next_available_at()`, `should_sync()`, `record_sync()`, `set_authenticated()`.
+Persistence via `from_state()`/`to_state()` converting to/from `RateLimitState`.
+`record_sync()` reconciles local window with server-reported usage (drops excess
+or adds synthetic entries). Expired requests pruned on load. Clock backward jump
+handled correctly. No `governor` crate used — custom sliding window as designed.
+clippy clean (only pre-existing dead-code warnings).
+
 ---
+
+## Break 1: Reflection
+
+Use plan mode or any brainstorming and code review skills to reflect on the design decisions and implementation so far. It is important we do this to fix issues early and stop us fighting an uphill battle later when the logic becomes larger and more complex to change.
+
+**Discuss:**
+- Are there still any open questions or design gaps for the steps we have implemented so far? Think about the design logic - are there any decisions we've made that don't make sense (overcomplicated, or too many assumptions)?
+- Do current tests adequately appraise the expected behaviour of configuration, logging, and caching? Can we trust that all tests passing means these functions of the app are working?
+- Looking ahead to the next phases, can you forsee any issues with how the new logic we will implement will interface with the logic we have already completed?
+- Anything else you need to be explained, or want to discuss?
 
 ## Phase 3: API Client
 
