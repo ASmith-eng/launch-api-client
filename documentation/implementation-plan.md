@@ -276,7 +276,7 @@ tests for the API client and UI rendering tests will fill remaining gaps.
 
 ## Phase 3: API Client
 
-### Step 3.1 — API client trait and LL2 implementation
+### Step 3.1 — API client trait and LL2 implementation ✅
 
 Build the HTTP client with the vendor-agnostic trait and LL2-specific
 implementation.
@@ -298,6 +298,23 @@ implementation.
 HTTP server (`wiremock`) verifies: successful list fetch parses correctly,
 successful detail fetch parses correctly, rate limiter blocks requests when
 exhausted.
+
+**Status:** Complete. 23 new tests (166 total). `LaunchApi` trait with native
+async fn (no `async-trait` crate needed on Rust 1.93). `Ll2Client<C: Clock>`
+wraps `reqwest::Client` + `Mutex<RateLimiter<C>>`. Rate limiter checked before
+each request; throttle endpoint does not count against limit. `LaunchDetail`
+domain type added with fields for the detail view (probability, weather,
+provider stats, rocket name, URLs, programs). `LaunchDetailCache.data` changed
+from `serde_json::Value` to typed `LaunchDetail` (resolves Open Question #2).
+Vendor types: `Ll2LaunchDetail`, `Ll2ThrottleResponse` (verified against live
+`/api-throttle/` endpoint — fields: `your_request_limit`, `current_use`,
+`limit_frequency_secs`, `next_use_secs`, `ident`). `endpoints.rs` with URL
+builders for all three endpoints + `ListParams` for filter query parameters.
+Conversions: `Ll2LaunchDetail → LaunchDetail`, `Ll2ThrottleResponse →
+ThrottleStatus`. All existing cache tests updated for typed `LaunchDetail`.
+wiremock integration tests cover: list fetch, detail fetch, 404 handling,
+throttle sync, rate limiter blocking, API key header injection, server error
+mapping. clippy clean (only pre-existing dead-code warnings).
 
 ---
 

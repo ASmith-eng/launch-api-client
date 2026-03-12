@@ -1414,3 +1414,36 @@ Example return value:
     "mission_patches": []
   }
 ```
+
+## API Throttle
+GET /api-throttle/
+
+#### Purpose
+Returns the current rate limit status for the requesting client. This endpoint
+does **not** count against the API rate limit, so it can be called freely for
+calibration.
+
+#### Return value
+status code: 200
+
+Example return value (verified 2026-03-12 against the dev server):
+```json
+{
+  "your_request_limit": 15,
+  "limit_frequency_secs": 3600,
+  "current_use": 0,
+  "next_use_secs": 0,
+  "ident": "[ipv4 or api key identifier]"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `your_request_limit` | integer | Maximum requests allowed in the rolling window |
+| `limit_frequency_secs` | integer | Rolling window duration in seconds (3600 = 1 hour) |
+| `current_use` | integer | Number of requests made in the current window |
+| `next_use_secs` | integer | Seconds until the next request slot opens (0 = available now) |
+| `ident` | string | The identifier used for rate limiting (IP address or API key) |
+
+Unauthenticated clients get a limit of 15/hour; authenticated clients (with
+`Authorization: Token <key>` header) get 30/hour.

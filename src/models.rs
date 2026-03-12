@@ -84,6 +84,54 @@ pub struct OrbitInfo {
     pub abbrev: String,
 }
 
+/// Full launch detail for the detail view.
+///
+/// Contains all fields from `LaunchSummary` plus additional data only
+/// available from the `/launch/{id}/` endpoint (detailed response mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchDetail {
+    pub id: String,
+    pub name: String,
+    pub net: DateTime<Utc>,
+    pub net_precision: Option<NetPrecision>,
+    pub window_start: Option<DateTime<Utc>>,
+    pub window_end: Option<DateTime<Utc>>,
+    pub status: LaunchStatus,
+    pub probability: Option<i32>,
+    pub weather_concerns: Option<String>,
+    pub image_url: Option<String>,
+    // Provider
+    pub launch_service_provider: Provider,
+    pub provider_total_launches: Option<u32>,
+    pub provider_successful_launches: Option<u32>,
+    pub provider_failed_launches: Option<u32>,
+    // Vehicle
+    pub rocket_full_name: Option<String>,
+    // Location
+    pub pad: PadInfo,
+    // Mission
+    pub mission: Option<MissionSummary>,
+    // Links
+    pub vid_urls: Vec<UrlEntry>,
+    pub info_urls: Vec<UrlEntry>,
+    // Programs
+    pub programs: Vec<String>,
+}
+
+/// A URL entry from the API (webcast link, info link, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UrlEntry {
+    pub title: Option<String>,
+    pub url: String,
+}
+
+/// Rate limit status returned by the `/api-throttle/` endpoint.
+#[derive(Debug, Clone)]
+pub struct ThrottleStatus {
+    pub remaining: usize,
+    pub limit: usize,
+}
+
 /// Cached launch list with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchListCache {
@@ -109,7 +157,7 @@ pub struct LaunchDetailCache {
     pub fetched_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub ttl_strategy: String,
-    pub data: serde_json::Value,
+    pub data: LaunchDetail,
 }
 
 impl LaunchDetailCache {
@@ -142,7 +190,7 @@ pub struct RateLimitState {
 pub const CACHE_VERSION: u32 = 1;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Round-trip test using the `app_state.json` example from the design doc.
@@ -229,23 +277,63 @@ mod tests {
     /// Round-trip test for `details/{uuid}.json`.
     #[test]
     fn launch_detail_cache_serde_round_trip() {
-        let json = r#"{
-            "version": 1,
-            "launch_id": "e3df2ecd-c239-472f-95e4-2b89b4f75800",
-            "fetched_at": "2026-02-22T10:20:00Z",
-            "expires_at": "2026-02-22T10:25:00Z",
-            "ttl_strategy": "imminent",
-            "data": { "name": "Starship IFT-7", "detailed": true }
-        }"#;
+        let cache = LaunchDetailCache {
+            version: 1,
+            launch_id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
+            fetched_at: "2026-02-22T10:20:00Z".parse().unwrap(),
+            expires_at: "2026-02-22T10:25:00Z".parse().unwrap(),
+            ttl_strategy: "imminent".into(),
+            data: dummy_launch_detail(),
+        };
 
-        let cache: LaunchDetailCache = serde_json::from_str(json).expect("deserialize");
         assert_eq!(cache.version, 1);
         assert_eq!(cache.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
         assert_eq!(cache.ttl_strategy, "imminent");
-        assert_eq!(cache.data["name"], "Starship IFT-7");
+        assert_eq!(cache.data.name, "Starship IFT-7");
 
         let serialized = serde_json::to_string(&cache).unwrap();
         let deserialized: LaunchDetailCache = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.launch_id, cache.launch_id);
+        assert_eq!(deserialized.data.name, "Starship IFT-7");
+    }
+
+    /// Helper to create a minimal `LaunchDetail` for tests.
+    pub(crate) fn dummy_launch_detail() -> LaunchDetail {
+        LaunchDetail {
+            id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
+            name: "Starship IFT-7".into(),
+            net: "2026-02-28T09:00:00Z".parse().unwrap(),
+            net_precision: None,
+            window_start: None,
+            window_end: None,
+            status: LaunchStatus {
+                id: 1,
+                name: "Go for Launch".into(),
+                abbrev: "Go".into(),
+            },
+            probability: None,
+            weather_concerns: None,
+            image_url: None,
+            launch_service_provider: Provider {
+                name: "SpaceX".into(),
+                provider_type: None,
+            },
+            provider_total_launches: None,
+            provider_successful_launches: None,
+            provider_failed_launches: None,
+            rocket_full_name: None,
+            pad: PadInfo {
+                name: None,
+                location: LocationInfo {
+                    name: "Starbase, Texas".into(),
+                    timezone_name: None,
+                    country: None,
+                },
+            },
+            mission: None,
+            vid_urls: vec![],
+            info_urls: vec![],
+            programs: vec![],
+        }
     }
 }

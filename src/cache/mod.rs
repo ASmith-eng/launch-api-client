@@ -372,8 +372,8 @@ mod tests {
     use super::*;
     use crate::clock::testing::FakeClock;
     use crate::models::{
-        LaunchStatus, LaunchSummary, LocationInfo, MissionSummary, PadInfo, Provider,
-        RateLimitState,
+        tests::dummy_launch_detail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
+        PadInfo, Provider, RateLimitState,
     };
     use chrono::{TimeDelta, Utc};
     use std::fs;
@@ -459,10 +459,7 @@ mod tests {
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(30),
             ttl_strategy: "short_term".into(),
-            data: serde_json::json!({
-                "name": "Starship IFT-7",
-                "status": { "id": 1, "name": "Go for Launch" }
-            }),
+            data: dummy_launch_detail(),
         }
     }
 
@@ -519,7 +516,7 @@ mod tests {
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
         assert_eq!(loaded.ttl_strategy, "short_term");
-        assert_eq!(loaded.data["name"], "Starship IFT-7");
+        assert_eq!(loaded.data.name, "Starship IFT-7");
     }
 
     #[test]
@@ -651,15 +648,15 @@ mod tests {
 
         let mut d2 = sample_launch_detail();
         d2.launch_id = "bbbb-2222".into();
-        d2.data = serde_json::json!({"name": "Falcon 9"});
+        d2.data.name = "Falcon 9".into();
 
         mgr.save_launch_detail(&d1).unwrap();
         mgr.save_launch_detail(&d2).unwrap();
 
         let loaded1 = mgr.load_launch_detail("aaaa-1111").unwrap().expect("d1");
         let loaded2 = mgr.load_launch_detail("bbbb-2222").unwrap().expect("d2");
-        assert_eq!(loaded1.data["name"], "Starship IFT-7");
-        assert_eq!(loaded2.data["name"], "Falcon 9");
+        assert_eq!(loaded1.data.name, "Starship IFT-7");
+        assert_eq!(loaded2.data.name, "Falcon 9");
     }
 
     // =====================================================================
@@ -964,7 +961,7 @@ mod tests {
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
             ttl_strategy: "real_time".into(),
-            data: serde_json::json!({}),
+            data: dummy_launch_detail(),
         };
         assert!(!detail.is_stale(now + TimeDelta::seconds(59)));
     }
@@ -978,7 +975,7 @@ mod tests {
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
             ttl_strategy: "real_time".into(),
-            data: serde_json::json!({}),
+            data: dummy_launch_detail(),
         };
         assert!(detail.is_stale(now + TimeDelta::minutes(1)));
     }
@@ -992,7 +989,7 @@ mod tests {
             fetched_at: now,
             expires_at: DateTime::<Utc>::MAX_UTC,
             ttl_strategy: "permanent".into(),
-            data: serde_json::json!({}),
+            data: dummy_launch_detail(),
         };
         // Even far in the future, permanent cache is never stale
         assert!(!detail.is_stale(now + TimeDelta::days(365 * 100)));
@@ -1020,7 +1017,7 @@ mod tests {
             fetched_at: now,
             expires_at: expires,
             ttl_strategy: strategy.as_str().into(),
-            data: serde_json::json!({}),
+            data: dummy_launch_detail(),
         };
 
         // Fresh at 29 minutes
@@ -1046,7 +1043,7 @@ mod tests {
             fetched_at: now,
             expires_at: expires,
             ttl_strategy: strategy.as_str().into(),
-            data: serde_json::json!({}),
+            data: dummy_launch_detail(),
         };
 
         assert!(!detail.is_stale(now + TimeDelta::seconds(59)));
@@ -1106,7 +1103,7 @@ mod tests {
             fetched_at,
             expires_at: fetched_at + TimeDelta::hours(1),
             ttl_strategy: "long_term".into(),
-            data: serde_json::json!({"id": id}),
+            data: dummy_launch_detail(),
         };
         mgr.save_launch_detail(&detail).unwrap();
     }
