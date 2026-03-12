@@ -322,7 +322,7 @@ fn load_versioned<T: DeserializeOwned + HasVersion>(path: &Path) -> Result<Optio
 /// Returns `true` when `startup_count` is a multiple of
 /// `prune_every_n_startups`. The config sanitizer guarantees this is >= 1.
 pub fn should_prune(startup_count: u32, config: &CacheConfig) -> bool {
-    startup_count % config.prune_every_n_startups == 0
+    startup_count.is_multiple_of(config.prune_every_n_startups)
 }
 
 /// Read just the `fetched_at` field from a detail cache JSON file.

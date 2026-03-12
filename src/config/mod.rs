@@ -17,7 +17,7 @@ use crate::error::AppError;
 ///
 /// All fields have defaults so the app works without a config file.
 /// Constructed via [`load_config`] or [`Config::default`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub api: ApiConfig,
@@ -86,17 +86,6 @@ pub struct LogConfig {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            api: ApiConfig::default(),
-            cache: CacheConfig::default(),
-            ui: UiConfig::default(),
-            log: LogConfig::default(),
-        }
-    }
-}
 
 impl Default for ApiConfig {
     fn default() -> Self {

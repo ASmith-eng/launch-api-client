@@ -233,7 +233,7 @@ clippy clean (only pre-existing dead-code warnings).
 
 ---
 
-## Break 1: Reflection
+## Break 1: Reflection ✅
 
 Use plan mode or any brainstorming and code review skills to reflect on the design decisions and implementation so far. It is important we do this to fix issues early and stop us fighting an uphill battle later when the logic becomes larger and more complex to change.
 
@@ -243,6 +243,37 @@ Use plan mode or any brainstorming and code review skills to reflect on the desi
 - Looking ahead to the next phases, can you forsee any issues with how the new logic we will implement will interface with the logic we have already completed?
 - Anything else you need to be explained, or want to discuss?
 
+**Status:** Complete. Full codebase review conducted. Findings:
+
+**Design decisions — all sound:**
+- Clock trait abstraction is consistent across CacheManager and RateLimiter.
+- Vendor boundary (LL2 types → domain types via `From`) is clean.
+- Config sanitization is thorough. `ErrorState::Transient` correctly uses
+  `std::time::Instant` (not `Clock`) for UI dismiss timing.
+- `governor` crate was already removed (custom rolling window is simpler).
+
+**Open questions status:**
+- #2 (detail view typed model): Add `LaunchDetail` struct in Step 3.1 when
+  defining the detail endpoint response shape.
+- #3 (crossterm event-stream): Already in Cargo.toml. Resolved.
+- #4 (config defaults): Code uses 180/30 matching the expiry section. Config
+  example in design doc is the outlier — doc-only fix needed. Resolved.
+- #1 (pagination), #5 (unicode-width), #6 (region IDs): Deferred to later
+  phases as noted in each question.
+
+**Test adequacy:** 143 tests provide good coverage for Phase 1–2. Integration
+tests for the API client and UI rendering tests will fill remaining gaps.
+
+**Looking ahead — no blockers:**
+- `main.rs` needs `#[tokio::main]` for async (Step 4.1).
+- Single-threaded `tokio::select!` avoids `Arc<Mutex>` on shared state.
+
+**Cleanup applied:**
+- Fixed clippy: `.is_multiple_of()` in cache/mod.rs, `#[derive(Default)]` on
+  Config.
+
+---
+
 ## Phase 3: API Client
 
 ### Step 3.1 — API client trait and LL2 implementation
@@ -251,20 +282,22 @@ Build the HTTP client with the vendor-agnostic trait and LL2-specific
 implementation.
 
 **Produce:**
-- `src/api/client.rs`: trait with methods for fetching launch list, launch
-  detail, and throttle status (design doc §Source Code Organisation —
+- `src/api/client.rs`: async trait with methods for fetching launch list,
+  launch detail, and throttle status (design doc §Source Code Organisation —
   `api::client` defines traits)
 - `src/vendor/launch_library_2/endpoints.rs`: base URL constants, endpoint
   paths, query parameter building (design doc §API Integration)
 - LL2 implementation of the API client trait using `reqwest`
 - Rate limiter integration: check before each request, record after
-- API key header injection when configured
+- API key header injection when configured (`Authorization: Token <key>`)
 - Dev vs production base URL from config
+- Typed `LaunchDetail` struct for the `/launch/{id}/` response (resolves
+  Open Question #2 — replaces raw `serde_json::Value` in detail cache)
 
 **Acceptance criteria:** `cargo check` passes. Integration test with a mock
-HTTP server (e.g., `wiremock` or `mockito`) verifies: successful list fetch
-parses correctly, successful detail fetch parses correctly, rate limiter
-blocks requests when exhausted.
+HTTP server (`wiremock`) verifies: successful list fetch parses correctly,
+successful detail fetch parses correctly, rate limiter blocks requests when
+exhausted.
 
 ---
 
@@ -308,8 +341,9 @@ Set up the ratatui terminal, app state machine, and async event loop.
 - `TerminalGuard` RAII struct for terminal restoration on normal exit and
   panic (design doc §Graceful Shutdown). Panic hook registered as secondary
   safety net.
-- `main.rs`: startup sequence wiring — config → logging → cache → rate
-  limiter → API sync → TUI (design doc §Startup Sequence)
+- `main.rs`: switch to `#[tokio::main] async fn main()`, wire up startup
+  sequence — config → logging → cache → rate limiter → API sync → TUI
+  (design doc §Startup Sequence)
 - Minimum terminal size check with warning render (design doc §Minimum
   Terminal Size)
 - Resize event handling
@@ -548,8 +582,7 @@ dependencies in unit tests.
 
 ## Open Questions
 
-Items identified during design review. Resolve as they come up during
-implementation — none are blockers for starting.
+Items identified during design review. Resolved items marked with ✅.
 
 1. **Pagination UX** (affects Step 4.2, 5.2)
    Keybindings include no page navigation (Page Up/Down, "load more").
@@ -557,28 +590,24 @@ implementation — none are blockers for starting.
    but the interaction model for moving between pages is unspecified.
    Decide: infinite scroll, explicit page buttons, or fixed single page?
 
-2. **Detail view data model** (affects Step 1.2, 5.1)
-   `LaunchDetailCache.data` is `serde_json::Value`. This works but means
-   manual JSON field access in the detail renderer. Consider adding a typed
-   `LaunchDetail` struct — can start with `Value` and type it later.
+2. ✅ **Detail view data model** — resolved in Break 1. A typed
+   `LaunchDetail` struct will be added in Step 3.1 alongside the detail
+   endpoint implementation, replacing raw `serde_json::Value` in the cache.
 
-3. **crossterm `event-stream` feature** (affects Step 1.1)
-   The async event loop uses `EventStream` which requires the
-   `event-stream` feature on the `crossterm` crate. Add it to `Cargo.toml`.
+3. ✅ **crossterm `event-stream` feature** — already present in Cargo.toml
+   since Step 1.1.
 
-4. **Config default discrepancy** (affects Step 1.3)
-   The cache expiry section says `ttl_near_future` = 180 min and
-   `ttl_imminent` = 30 min. The `config.toml` example says 60 and 5
-   respectively. Pick one set of values and update the other.
+4. ✅ **Config default discrepancy** — code defaults (180/30) match the
+   design doc's cache expiry section. The config.toml example in the design
+   doc is the outlier and should be updated to match (doc-only fix).
 
-5. **`unicode-width` dependency** (affects Step 1.1, 4.2)
+5. **`unicode-width` dependency** (affects Step 4.2)
    Mentioned in edge case tests for CJK display width but not in the
    dependency list. Add if CJK launch site names are expected.
 
-6. **Region map location IDs** (affects Step 1.2)
-   The design references a region-to-`pad__location` mapping but does not
-   list the actual LL2 location IDs. These need to be sourced from the API
-   (or its docs) when building `region_map.rs`.
+6. **Region map location IDs** (affects Step 6.1)
+   `region_map.rs` has placeholder IDs. These should be verified against the
+   LL2 API when filter integration is built in Step 6.1.
 
 ---
 
