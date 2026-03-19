@@ -373,7 +373,7 @@ triggers throttle sync, timeout returns offline-compatible error,
 
 ## Phase 4: TUI — Core Loop & List View
 
-### Step 4.1 — Application state and event loop
+### Step 4.1 — Application state and event loop ✅
 
 Set up the ratatui terminal, app state machine, and async event loop.
 
@@ -396,6 +396,31 @@ Set up the ratatui terminal, app state machine, and async event loop.
 placeholder UI, responds to `q` to quit, and restores terminal on exit
 (including on panic — verify `TerminalGuard::drop` runs). Resize below
 80x24 shows warning.
+
+**Status:** Complete. 181 tests still passing (no new tests — this step is
+primarily wiring). New files:
+
+- `src/tui/app.rs` — `App` struct with all state fields from the design doc,
+  `AppScreen` enum (List/Detail/Help/FilterPanel), `FilterState` struct,
+  `MIN_COLS`/`MIN_ROWS` constants, `is_terminal_too_small()` helper.
+- `src/tui/terminal.rs` — `TerminalGuard` RAII struct (Drop restores terminal),
+  `setup_terminal()` (alternate screen + raw mode), `install_panic_hook()`
+  (secondary safety net). Type alias `Tui` for the terminal backend.
+- `src/tui/event.rs` — `run_event_loop()` with `tokio::select!` multiplexing
+  crossterm `EventStream` and optional pending API future. `FetchResult` enum
+  for async fetch outcomes. Key handlers for List/Detail/Help/FilterPanel
+  screens (q/Esc/arrows/Enter/?/Ctrl+C). Placeholder renderers for all views.
+  Minimum terminal size warning. Error state rendering (Transient auto-dismiss
+  after 10s, RateLimited with reset time, Offline indicator).
+- `src/main.rs` — Full startup sequence: `#[tokio::main]`, AppDirs → config →
+  logging → CacheManager → app_state load/create → startup count increment →
+  conditional cache pruning → Ll2Client with RateLimiter from persisted state →
+  `/api-throttle/` sync → cache.json load with freshness check → terminal setup
+  → initial fetch if needed → event loop → save app_state on exit.
+- `Cargo.toml` — Added `futures = "0.3"` for `StreamExt` (used with crossterm
+  `EventStream`).
+
+clippy clean (only pre-existing dead-code warnings from unused-yet pub items).
 
 ---
 

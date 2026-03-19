@@ -829,6 +829,7 @@ dependencies = [
  "chrono-tz",
  "crossterm",
  "directories",
+ "futures",
  "ratatui",
  "reqwest",
  "serde",
