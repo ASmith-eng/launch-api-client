@@ -5,8 +5,9 @@
 //! integrated client-side rate limiting.
 
 use std::sync::Mutex;
+use std::time::Duration;
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::api::rate_limiter::RateLimiter;
 use crate::clock::Clock;
@@ -16,6 +17,9 @@ use crate::vendor::launch_library_2::endpoints::{self, ListParams};
 use crate::vendor::launch_library_2::response_models::{
     Ll2LaunchDetail, Ll2Launch, Ll2ThrottleResponse, PaginatedResponse,
 };
+
+/// Delay between the first failed attempt and the automatic retry.
+const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Result of a successful launch list fetch.
 #[derive(Debug)]
@@ -119,6 +123,106 @@ impl<C: Clock> Ll2Client<C> {
             message,
         })
     }
+
+    /// Send a request with automatic retry for retryable errors and 429 handling.
+    ///
+    /// - **429**: syncs with `/api-throttle/` and returns `AppError::RateLimited`
+    /// - **Retryable** (5xx, timeout, connect): waits 1 second, retries once
+    /// - **Non-retryable** (4xx, deserialization): returns immediately
+    async fn send_with_retry(&self, url: &str) -> Result<reqwest::Response, AppError> {
+        match self.send_and_check(url).await {
+            Ok(resp) => Ok(resp),
+            Err(AppError::ApiError { status: 429, .. }) => self.handle_429().await,
+            Err(e) if e.is_retryable() => {
+                warn!(error = %e, "retryable error, retrying in 1s");
+                tokio::time::sleep(RETRY_DELAY).await;
+                // On retry, a 429 also triggers throttle sync.
+                match self.send_and_check(url).await {
+                    Err(AppError::ApiError { status: 429, .. }) => self.handle_429().await,
+                    other => other,
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Handle a 429 response: best-effort throttle sync, then return `RateLimited`.
+    async fn handle_429(&self) -> Result<reqwest::Response, AppError> {
+        warn!("received 429, syncing with throttle endpoint");
+
+        // Best-effort sync — if it fails, fall back to local rate limit state.
+        match self.fetch_throttle_raw().await {
+            Ok(status) => {
+                let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+                limiter.record_sync(status.remaining, status.limit);
+            }
+            Err(e) => {
+                warn!(error = %e, "throttle sync failed after 429, using local state");
+            }
+        }
+
+        let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+        let available_at = limiter.next_available_at();
+        Err(AppError::RateLimited(available_at))
+    }
+
+    /// Raw HTTP call to the throttle endpoint — no rate limiter interaction.
+    async fn fetch_throttle_raw(&self) -> Result<ThrottleStatus, AppError> {
+        let url = endpoints::api_throttle_url(&self.base_url);
+        let response = self.send_and_check(&url).await?;
+        let ll2_throttle: Ll2ThrottleResponse = response.json().await?;
+        Ok(ll2_throttle.into())
+    }
+
+    /// Sync with the `/api-throttle/` endpoint, retrying once on transient failure.
+    ///
+    /// Intended for use during startup (design doc §Startup Sequence step 3).
+    /// On permanent failure, logs a warning and returns the error — the caller
+    /// should continue with local rate limit tracking.
+    pub async fn sync_throttle_with_retry(&self) -> Result<ThrottleStatus, AppError> {
+        let apply_sync = |this: &Self, status: &ThrottleStatus| {
+            let mut limiter = this.rate_limiter.lock().expect("rate limiter lock poisoned");
+            limiter.record_sync(status.remaining, status.limit);
+            debug!(
+                remaining = status.remaining,
+                limit = status.limit,
+                "startup throttle sync complete"
+            );
+        };
+
+        match self.fetch_throttle_raw().await {
+            Ok(status) => {
+                apply_sync(self, &status);
+                Ok(status)
+            }
+            Err(e) if e.is_retryable() => {
+                warn!(error = %e, "startup throttle sync failed, retrying in 1s");
+                tokio::time::sleep(RETRY_DELAY).await;
+                match self.fetch_throttle_raw().await {
+                    Ok(status) => {
+                        apply_sync(self, &status);
+                        Ok(status)
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "startup throttle sync failed after retry, \
+                             continuing with local tracking"
+                        );
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "startup throttle sync failed (non-retryable), \
+                     continuing with local tracking"
+                );
+                Err(e)
+            }
+        }
+    }
 }
 
 impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
@@ -129,7 +233,7 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         self.check_and_record_request()?;
 
         let url = endpoints::launches_upcoming_url(&self.base_url, params);
-        let response = self.send_and_check(&url).await?;
+        let response = self.send_with_retry(&url).await?;
         let paginated: PaginatedResponse<Ll2Launch> = response.json().await?;
 
         let launches = paginated.results.into_iter().map(Into::into).collect();
@@ -143,7 +247,7 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         self.check_and_record_request()?;
 
         let url = endpoints::launch_detail_url(&self.base_url, id);
-        let response = self.send_and_check(&url).await?;
+        let response = self.send_with_retry(&url).await?;
         let ll2_detail: Ll2LaunchDetail = response.json().await?;
 
         Ok(ll2_detail.into())
@@ -151,18 +255,13 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
 
     async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
         // Throttle endpoint does NOT count against the rate limit.
-        let url = endpoints::api_throttle_url(&self.base_url);
-        let response = self.send_and_check(&url).await?;
-        let ll2_throttle: Ll2ThrottleResponse = response.json().await?;
-
-        let status: ThrottleStatus = ll2_throttle.into();
+        let status = self.fetch_throttle_raw().await?;
         debug!(
             remaining = status.remaining,
             limit = status.limit,
             "throttle sync complete"
         );
 
-        // Update the local rate limiter with server state.
         let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
         limiter.record_sync(status.remaining, status.limit);
 
@@ -483,15 +582,16 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // --- Error handling ---
+    // --- Retry behavior tests ---
 
     #[tokio::test]
-    async fn server_error_returns_api_error() {
+    async fn server_5xx_triggers_retry_then_returns_error() {
         let (client, server) = setup().await;
 
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
             .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+            .expect(2) // Original + 1 retry
             .mount(&server)
             .await;
 
@@ -503,7 +603,249 @@ mod tests {
                 assert_eq!(status, 500);
                 assert_eq!(message, "Internal Server Error");
             }
-            other => panic!("expected ApiError, got: {other:?}"),
+            other => panic!("expected ApiError 500, got: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn server_5xx_retry_succeeds_on_second_attempt() {
+        let (client, server) = setup().await;
+
+        // Mount 200 response first (lower priority — fallback).
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        // Mount 500 response second (higher priority), matches only once.
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Temporary Error"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        let result = client
+            .fetch_launch_list(&ListParams::default())
+            .await
+            .expect("should succeed on retry");
+
+        assert_eq!(result.total_count, 147);
+        assert_eq!(result.launches.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn client_4xx_does_not_retry() {
+        let (client, server) = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Bad Request"))
+            .expect(1) // Exactly 1 request — no retry
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_list(&ListParams::default()).await;
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            AppError::ApiError { status: 400, .. } => {}
+            other => panic!("expected ApiError 400, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn detail_404_does_not_retry() {
+        let (client, server) = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/launch/nonexistent-id/"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .expect(1) // Exactly 1 request — no retry
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_detail("nonexistent-id").await;
+
+        match result.unwrap_err() {
+            AppError::ApiError { status: 404, .. } => {}
+            other => panic!("expected ApiError 404, got: {other:?}"),
+        }
+    }
+
+    // --- 429 / throttle sync tests ---
+
+    #[tokio::test]
+    async fn server_429_triggers_throttle_sync_and_returns_rate_limited() {
+        let (client, server) = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("Too Many Requests"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_list(&ListParams::default()).await;
+
+        match result.unwrap_err() {
+            AppError::RateLimited(_) => {}
+            other => panic!("expected RateLimited, got: {other:?}"),
+        }
+
+        // Throttle sync should have updated the rate limiter.
+        // Server reports current_use=3, limit=15 → remaining=12.
+        // But we also recorded 1 request via check_and_record_request before
+        // the 429, and record_sync reconciles to server state.
+        assert_eq!(client.rate_limiter().remaining(), 12);
+    }
+
+    #[tokio::test]
+    async fn server_429_with_throttle_failure_still_returns_rate_limited() {
+        let (client, server) = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("Too Many Requests"))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Server Error"))
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_list(&ListParams::default()).await;
+
+        // Should still return RateLimited even if throttle sync fails.
+        match result.unwrap_err() {
+            AppError::RateLimited(_) => {}
+            other => panic!("expected RateLimited, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn server_429_on_retry_triggers_throttle_sync() {
+        let (client, server) = setup().await;
+
+        // First request returns 502 (retryable), retry returns 429.
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("Too Many Requests"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("Bad Gateway"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_list(&ListParams::default()).await;
+
+        match result.unwrap_err() {
+            AppError::RateLimited(_) => {}
+            other => panic!("expected RateLimited, got: {other:?}"),
+        }
+    }
+
+    // --- Startup throttle sync tests ---
+
+    #[tokio::test]
+    async fn startup_sync_retries_on_5xx_and_succeeds() {
+        let server = MockServer::start().await;
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new(server.uri(), None, limiter).unwrap();
+
+        // Mount 200 first (lower priority — fallback after first failure).
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        // Mount 500 second (higher priority), matches only once.
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Temporary Error"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        let result = client.sync_throttle_with_retry().await;
+        let status = result.expect("should succeed on retry");
+        assert_eq!(status.remaining, 12);
+        assert_eq!(status.limit, 15);
+
+        // Rate limiter should be updated.
+        assert_eq!(client.rate_limiter().remaining(), 12);
+    }
+
+    #[tokio::test]
+    async fn startup_sync_degrades_gracefully_on_persistent_failure() {
+        let server = MockServer::start().await;
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new(server.uri(), None, limiter).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Server Error"))
+            .expect(2) // Original + 1 retry
+            .mount(&server)
+            .await;
+
+        let result = client.sync_throttle_with_retry().await;
+        assert!(result.is_err());
+
+        // Rate limiter should still work with local defaults.
+        assert_eq!(client.rate_limiter().remaining(), 15);
+    }
+
+    #[tokio::test]
+    async fn startup_sync_no_retry_on_4xx() {
+        let server = MockServer::start().await;
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new(server.uri(), None, limiter).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/api-throttle/"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .expect(1) // No retry for 4xx
+            .mount(&server)
+            .await;
+
+        let result = client.sync_throttle_with_retry().await;
+        assert!(result.is_err());
     }
 }

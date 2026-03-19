@@ -318,7 +318,7 @@ mapping. clippy clean (only pre-existing dead-code warnings).
 
 ---
 
-### Step 3.2 — Error handling and retry logic
+### Step 3.2 — Error handling and retry logic ✅
 
 Add network error handling, retry, and `/api-throttle/` sync.
 
@@ -341,6 +341,33 @@ retry then returns error, 4xx skips retry and returns error immediately, 429
 triggers throttle sync, timeout returns offline-compatible error,
 `/api-throttle/` failure retries once then degrades gracefully.
 `cargo test` passes.
+
+**Status:** Complete. 15 new tests (181 total). Changes:
+
+- `src/error.rs` — `is_retryable()` extended to classify `ApiError` with 5xx
+  status as retryable. New `is_offline_signal()` method for UI-layer offline
+  detection (connect errors + timeouts).
+- `src/api/client.rs` — `send_with_retry()`: wraps `send_and_check()` with
+  single automatic retry (1-second `tokio::time::sleep`) for retryable errors.
+  `handle_429()`: on 429 response, best-effort sync with `/api-throttle/`
+  endpoint then returns `AppError::RateLimited(next_available_at)`. If throttle
+  sync itself fails, falls back to local rate limiter state.
+  `fetch_throttle_raw()`: extracted raw throttle HTTP call shared by
+  `handle_429()`, `fetch_throttle_status()`, and `sync_throttle_with_retry()`.
+  `sync_throttle_with_retry()`: public method for startup sequence — calls
+  throttle endpoint with single retry on transient failure, degrades gracefully
+  on persistent failure (logs warning, returns error for caller to handle).
+  Trait impl methods now use `send_with_retry()` instead of `send_and_check()`.
+- wiremock tests cover: 5xx triggers retry (2 requests made), 5xx retry
+  succeeds on second attempt, 4xx skips retry (1 request), 404 detail skips
+  retry, 429 → throttle sync + RateLimited error, 429 with throttle sync
+  failure still returns RateLimited, 429 on retry attempt also triggers throttle
+  sync, startup sync retries on 5xx and succeeds, startup sync degrades
+  gracefully on persistent failure (2 requests), startup sync no retry on 4xx
+  (1 request).
+- `is_offline_signal()` tested via unit tests on error variants (Network errors
+  signal offline; ApiError, CacheIo, Config, RateLimited do not).
+- clippy clean (only pre-existing dead-code warnings from unused-yet pub items).
 
 ---
 

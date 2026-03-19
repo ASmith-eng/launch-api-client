@@ -25,6 +25,10 @@ pub enum AppError {
 
 impl AppError {
     /// Whether this error is transient and the operation may succeed on retry.
+    ///
+    /// Retryable: connection timeout/reset, DNS failure, HTTP 5xx.
+    /// Non-retryable: HTTP 4xx (except 429 handled separately), deserialization,
+    /// cache I/O, rate limit, config errors.
     pub fn is_retryable(&self) -> bool {
         match self {
             AppError::Network(e) => {
@@ -33,6 +37,18 @@ impl AppError {
                     || e.status()
                         .is_some_and(|s| s.is_server_error())
             }
+            AppError::ApiError { status, .. } => (500..=599).contains(status),
+            _ => false,
+        }
+    }
+
+    /// Whether this error suggests the device is offline.
+    ///
+    /// Used by the UI layer to set `ErrorState::Offline`. Connection failures
+    /// and timeouts are the strongest signals of no network connectivity.
+    pub fn is_offline_signal(&self) -> bool {
+        match self {
+            AppError::Network(e) => e.is_connect() || e.is_timeout(),
             _ => false,
         }
     }
@@ -63,10 +79,31 @@ mod tests {
     }
 
     #[test]
-    fn api_error_is_not_retryable() {
+    fn api_error_4xx_is_not_retryable() {
         let err = AppError::ApiError {
             status: 400,
             message: "Bad Request".into(),
+        };
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn api_error_5xx_is_retryable() {
+        for status in [500, 502, 503, 504] {
+            let err = AppError::ApiError {
+                status,
+                message: format!("Server Error {status}"),
+            };
+            assert!(err.is_retryable(), "status {status} should be retryable");
+        }
+    }
+
+    #[test]
+    fn api_error_429_is_not_retryable() {
+        // 429 is handled separately via throttle sync, not generic retry.
+        let err = AppError::ApiError {
+            status: 429,
+            message: "Too Many Requests".into(),
         };
         assert!(!err.is_retryable());
     }
@@ -112,5 +149,37 @@ mod tests {
             message: "Not Found".into(),
         };
         assert_eq!(err.to_string(), "API returned error 404: Not Found");
+    }
+
+    // --- is_offline_signal tests ---
+
+    #[test]
+    fn rate_limited_is_not_offline_signal() {
+        let err = AppError::RateLimited(Utc::now());
+        assert!(!err.is_offline_signal());
+    }
+
+    #[test]
+    fn api_error_is_not_offline_signal() {
+        let err = AppError::ApiError {
+            status: 500,
+            message: "Server Error".into(),
+        };
+        assert!(!err.is_offline_signal());
+    }
+
+    #[test]
+    fn cache_io_is_not_offline_signal() {
+        let err = AppError::CacheIo(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert!(!err.is_offline_signal());
+    }
+
+    #[test]
+    fn config_error_is_not_offline_signal() {
+        let err = AppError::Config("bad config".into());
+        assert!(!err.is_offline_signal());
     }
 }
