@@ -19,6 +19,9 @@ pub enum AppError {
     #[error("Cache deserialization failed: {0}")]
     CacheParse(#[from] serde_json::Error),
 
+    #[error("I/O error: {0}")]
+    Io(std::io::Error),
+
     #[error("Configuration error: {0}")]
     Config(String),
 }
@@ -181,5 +184,51 @@ mod tests {
     fn config_error_is_not_offline_signal() {
         let err = AppError::Config("bad config".into());
         assert!(!err.is_offline_signal());
+    }
+
+    // --- Io variant tests ---
+
+    #[test]
+    fn io_error_is_not_retryable() {
+        let err = AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "terminal write failed",
+        ));
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn io_error_is_not_offline_signal() {
+        let err = AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "terminal write failed",
+        ));
+        assert!(!err.is_offline_signal());
+    }
+
+    #[test]
+    fn io_error_display() {
+        let err = AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "terminal write failed",
+        ));
+        assert!(err.to_string().contains("terminal write failed"));
+        // Verify it uses "I/O error" prefix, not "Cache I/O error".
+        assert!(err.to_string().starts_with("I/O error"));
+    }
+
+    #[test]
+    fn cache_io_and_io_are_distinct() {
+        let cache_err = AppError::CacheIo(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "missing",
+        ));
+        let io_err = AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "missing",
+        ));
+        // They should have different Display prefixes.
+        assert!(cache_err.to_string().starts_with("Cache I/O"));
+        assert!(io_err.to_string().starts_with("I/O error"));
     }
 }

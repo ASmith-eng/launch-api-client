@@ -9,6 +9,7 @@ mod tui;
 mod vendor;
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use chrono::Utc;
 use tracing::{info, warn};
@@ -20,7 +21,7 @@ use clock::{Clock, SystemClock};
 use config::{load_config, AppDirs};
 use models::{AppState, CACHE_VERSION};
 use tui::app::App;
-use tui::event::{FetchResult, run_event_loop};
+use tui::event::{run_event_loop, FetchResult};
 use tui::terminal::{install_panic_hook, setup_terminal};
 use vendor::launch_library_2::endpoints::ListParams;
 
@@ -80,7 +81,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Maybe prune detail cache.
     if cache::should_prune(app_state.startup_count, &config.cache) {
-        info!("running cache pruning (startup #{})", app_state.startup_count);
+        info!(
+            "running cache pruning (startup #{})",
+            app_state.startup_count
+        );
         if let Err(e) = cache_manager.prune_details(&config.cache) {
             warn!(error = %e, "cache pruning failed");
         }
@@ -90,7 +94,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Create API client with rate limiter from persisted state.
     let authenticated = !config.api.api_key.is_empty();
     let rate_limiter = RateLimiter::from_state(clock, &app_state.rate_limit);
-    let api_client = Ll2Client::new(
+    let api_client = Arc::new(Ll2Client::new(
         config.api.base_url.clone(),
         if authenticated {
             Some(config.api.api_key.clone())
@@ -98,7 +102,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             None
         },
         rate_limiter,
-    )?;
+    )?);
 
     // 5. Sync rate limit with /api-throttle/ (best-effort).
     if let Err(e) = api_client.sync_throttle_with_retry().await {
@@ -160,19 +164,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 limit: config.ui.launches_per_page,
                 ..Default::default()
             };
-            // Spawn the fetch as a future we can select on.
-            Some(Box::pin(fetch_launch_list(api_client, params)))
+            let client_clone = Arc::clone(&api_client);
+            Some(Box::pin(fetch_launch_list(client_clone, params)))
         } else {
             None
         };
 
     // 9. Run the event loop.
-    let result = run_event_loop(&mut terminal, &mut app, pending_fetch).await;
+    let result = run_event_loop(
+        &mut terminal,
+        &mut app,
+        Arc::clone(&api_client),
+        &cache_manager,
+        &config.cache,
+        pending_fetch,
+    )
+    .await;
 
-    // 10. Save app state on exit.
-    // Note: api_client was moved into the fetch future if needs_fetch was true.
-    // Persisting rate limit state will be fully wired in Step 8.1 when we
-    // keep the client accessible throughout the event loop.
+    // 10. Save app state on exit, including current rate limit state.
+    {
+        let limiter = api_client.rate_limiter();
+        app_state.rate_limit = limiter.to_state();
+    }
     app_state.last_startup = Utc::now();
     if let Err(e) = cache_manager.save_app_state(&app_state) {
         warn!(error = %e, "failed to save app_state.json on exit");
@@ -184,7 +197,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Fetch the launch list, returning a [`FetchResult`] for the event loop.
 async fn fetch_launch_list<C: clock::Clock + Send + Sync + 'static>(
-    client: Ll2Client<C>,
+    client: Arc<Ll2Client<C>>,
     params: ListParams,
 ) -> FetchResult {
     match client.fetch_launch_list(&params).await {

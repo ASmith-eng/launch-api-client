@@ -565,6 +565,97 @@ Use plan mode or any brainstorming and code review skills to reflect on the desi
 - Looking ahead to the next phases, can you forsee any issues with how the new logic we will implement will interface with the logic we have already completed?
 - Anything else you need to be explained, or want to discuss?
 
+**Status:** Complete. Full codebase review of Phase 3–4 conducted. Findings:
+
+**Design decisions — all sound:**
+- Rate limiter behind `Mutex` with `&self` trait methods; never held across await
+  points.
+- `send_with_retry()` layered on `send_and_check()` — clean separation of retry
+  logic from core HTTP.
+- 429 handling with best-effort `/api-throttle/` sync and local-state fallback.
+- `ErrorState` uses `std::time::Instant` (monotonic) for transient auto-dismiss,
+  not `Clock` trait — correct for UI timing.
+- `TerminalGuard` RAII + panic hook — belt-and-suspenders terminal restoration.
+
+**Issues identified (addressed in Break 2.2 and future steps):**
+1. Terminal draw errors mapped to `AppError::CacheIo` — semantically wrong.
+   → Fix in Break 2.2: add generic `Io` variant.
+2. `api_client` moved into initial fetch future — can't be reused for detail
+   fetches, refresh, or filter re-fetches. Blocks Step 5.2.
+   → Fix in Break 2.2: wrap client in `Arc`.
+3. `handle_fetch_result` updates `app.launches` in memory but never persists to
+   cache. `CacheManager` not accessible from the event loop.
+   → Address in Step 5.2: pass `CacheManager` into event loop or wrap in `Arc`.
+4. `detail_scroll_offset` increments without upper bound — user can scroll past
+   content. → Clamp in Step 5.1 when content height is known.
+5. No `r` (refresh) key handler despite status bar showing "Press 'r' to refresh".
+   → Wire in Step 5.2 alongside `Arc<Client>` + cache access.
+
+**Test adequacy:**
+- API client (Phase 3): Strong. wiremock integration tests cover all HTTP status
+  codes, retry behaviour, 429 flow, API key injection, request counts.
+- TUI rendering (Phase 4): Pure function tests (scroll offset, truncation, time
+  formatting, status bar states) are thorough. No `TestBackend` rendering tests
+  yet — defer to Step 8.2 per design doc §Testing Strategy.
+- Event loop: No tests (async + terminal is hard to unit test), but
+  `handle_fetch_result` is a pure state transition that could be tested. Consider
+  in Step 8.2.
+
+**Cleanup applied:**
+- Fixed clippy: removed `.into()` on already-correct `std::io::Error` type in
+  `event.rs`, then simplified to `AppError::CacheIo` constructor reference.
+
+---
+
+### Break 2.2 — Pre-Phase 5 refactoring
+
+Address structural issues identified in Break 2 that would block or complicate
+Phase 5 implementation.
+
+**Produce:**
+- Add generic `AppError::Io(std::io::Error)` variant to `src/error.rs` for
+  non-cache I/O errors (terminal rendering, future general I/O). Update
+  `event.rs` render error mapping to use the new variant. Existing `CacheIo`
+  variant remains for cache-specific errors with its `#[from]` derive — the new
+  `Io` variant is constructed explicitly (no `#[from]` to avoid conflict).
+- Wrap `Ll2Client` in `Arc` so it can be shared between the startup fetch future
+  and the event loop. Update `main.rs` to use `Arc<Ll2Client<C>>` and clone into
+  the fetch closure. Update `fetch_launch_list()` to accept `Arc<Ll2Client<C>>`.
+- Pass `CacheManager` (or a reference/`Arc`) into `run_event_loop()` so that
+  fetch results can be persisted to disk. Update the event loop signature and
+  `handle_fetch_result` to accept and use it.
+- Update `FetchResult::LaunchList` to include cache metadata (`fetched_at`,
+  `expires_at`) so the event loop can update `app.cache_fetched_at` and
+  `app.cache_expires_at` after a successful fetch.
+
+**Acceptance criteria:** `cargo test` passes. `cargo clippy` clean (only
+pre-existing dead-code warnings). The API client is accessible from the event
+loop after the initial fetch. Fetch results are persisted to cache. Terminal
+render errors use `AppError::Io`, not `AppError::CacheIo`.
+
+**Status:** Complete. 10 new tests (262 total). Changes:
+
+- `src/error.rs` — Added `AppError::Io(std::io::Error)` variant (no `#[from]`,
+  constructed explicitly to avoid conflict with `CacheIo`). 4 new tests: not
+  retryable, not offline signal, display prefix is "I/O error" (distinct from
+  "Cache I/O error"), distinct from `CacheIo`.
+- `src/tui/event.rs` — Terminal render errors now use `AppError::Io` instead of
+  `AppError::CacheIo`. `run_event_loop()` signature expanded: accepts
+  `Arc<Ll2Client<C>>`, `&CacheManager<C>`, and `&CacheConfig`. Generic over
+  `C: Clock + Send + Sync + 'static`. `handle_fetch_result()` now takes client,
+  cache manager, and cache config; on successful list fetch: persists to disk via
+  `cache_manager.save_launch_list()`, updates `app.cache_fetched_at` /
+  `cache_expires_at`, updates `app.rate_limit_remaining` / `rate_limit_total`
+  from the client's rate limiter. 6 new tests for `handle_fetch_result`:
+  state update, cache persistence, selection reset, transient error, rate limited
+  error, offline cleared on success.
+- `src/main.rs` — `Ll2Client` wrapped in `Arc`. `fetch_launch_list()` accepts
+  `Arc<Ll2Client<C>>`. Event loop receives `Arc::clone(&api_client)`,
+  `&cache_manager`, `&config.cache`. On exit, rate limit state persisted from
+  `api_client.rate_limiter().to_state()` into `app_state` (no longer lost on
+  exit). Removed stale comment about Step 8.1 fixing client access.
+- clippy clean (only pre-existing dead-code warnings).
+
 ---
 
 ## Phase 5: TUI — Detail View & Data Flow
@@ -586,23 +677,30 @@ Render the full launch detail screen.
 - Links section with cyan labels (design doc §Link Styling)
 - Section separators in dark gray dim (design doc §Section separators)
 - Vertical scrolling with scroll indicator
+- Clamp `detail_scroll_offset` to content height so the user cannot scroll
+  past the end of the detail content (Break 2 finding #4)
 
 **Acceptance criteria:** Selecting a launch and pressing Enter shows the
-detail view. Content matches the design doc mockup. Scrolling works.
-Esc returns to list. Responsive layout switches at 100 columns.
+detail view. Content matches the design doc mockup. Scrolling works and
+is clamped to content bounds. Esc returns to list. Responsive layout
+switches at 100 columns.
 
 ---
 
 ### Step 5.2 — Data fetching integration
 
-Wire up API calls to user actions with loading/error states.
+Wire up API calls to user actions with loading/error states. Relies on the
+`Arc<Client>` and `CacheManager` access established in Break 2.2.
 
 **Produce:**
 - Startup fetch: load list from cache or API (design doc §Startup Sequence
   step 4)
 - Enter on launch: fetch detail if not cached/stale (design doc §Viewing
-  Launch Details)
-- Refresh (`r` key): only when stale (design doc §Manual Refresh Logic)
+  Launch Details). Cache the `LaunchDetail` in `app.detail_cache` and persist
+  via `CacheManager` (Break 2 finding #3).
+- Refresh (`r` key): wire the handler in `handle_list_key` — only triggers
+  when cache is stale and no fetch is in-flight (design doc §Manual Refresh
+  Logic). Spawns a new list fetch using the `Arc<Client>` (Break 2 finding #5).
 - Loading state: "Fetching launches..." / "Refreshing..." / "Retrying..."
   indicators
 - Error display driven by `ErrorState` variants (design doc §Application
@@ -611,11 +709,14 @@ Wire up API calls to user actions with loading/error states.
   - `RateLimited`: disables refresh key, shows countdown to reset time
   - `Offline`: `[OFFLINE]` indicator in status bar, cleared on success
 - First-run experience (design doc §First-Run Experience)
+- Update `app.rate_limit_remaining` / `rate_limit_total` after each fetch
+  completes (currently only set once at startup)
 
 **Acceptance criteria:** App fetches on startup when cache is missing.
 Detail fetch triggers on Enter. Refresh only works when stale.
 `ErrorState::Transient` displays and auto-dismisses. `ErrorState::RateLimited`
 disables refresh and shows reset time. `ErrorState::Offline` shows indicator.
+Fetched data is persisted to cache via `CacheManager`.
 
 ---
 
@@ -760,8 +861,10 @@ Items identified during design review. Resolved items marked with ✅.
    dependency list. Add if CJK launch site names are expected.
 
 6. **Region map location IDs** (affects Step 6.1)
-   `region_map.rs` has placeholder IDs. These should be verified against the
-   LL2 API when filter integration is built in Step 6.1.
+   `region_map.rs` has placeholder IDs. These must be manually verified against
+   the live LL2 API before Step 6.1 — query `/location/` endpoint and confirm
+   that each region's location IDs match what the API returns. This is a manual
+   prerequisite; do not start Step 6.1 until this is done.
 
 ---
 
@@ -786,7 +889,7 @@ Items identified during design review. Resolved items marked with ✅.
                             ↓
                     4.1 → 4.2 → 4.3 → 4.4
                                         ↓
-                                5.1 → 5.2 → 6.1 → 6.2
-                                                    ↓
-                                            7.1 → 8.1 → 8.2
+                              Break 2.2 → 5.1 → 5.2 → 6.1 → 6.2
+                                                            ↓
+                                                    7.1 → 8.1 → 8.2
 ```
