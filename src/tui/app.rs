@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
+
+use crate::config::UiConfig;
 use crate::models::{LaunchDetailCache, LaunchSummary};
 use crate::error::ErrorState;
 
@@ -70,6 +73,12 @@ pub struct App {
     pub rate_limit_remaining: Option<u32>,
     /// Total API request limit for the current window.
     pub rate_limit_total: Option<u32>,
+    /// When the current launch list cache was fetched.
+    pub cache_fetched_at: Option<DateTime<Utc>>,
+    /// When the current launch list cache expires.
+    pub cache_expires_at: Option<DateTime<Utc>>,
+    /// UI display configuration (time format, staleness style).
+    pub ui_config: UiConfig,
     /// Whether the app should exit on the next loop iteration.
     pub should_quit: bool,
 }
@@ -92,6 +101,9 @@ impl App {
             total_count: 0,
             rate_limit_remaining: None,
             rate_limit_total: None,
+            cache_fetched_at: None,
+            cache_expires_at: None,
+            ui_config: UiConfig::default(),
             should_quit: false,
         }
     }

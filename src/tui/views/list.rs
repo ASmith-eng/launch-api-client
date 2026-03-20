@@ -12,6 +12,7 @@ use ratatui::widgets::Paragraph;
 use crate::models::LaunchSummary;
 use crate::tui::app::App;
 use crate::tui::time_fmt;
+use crate::tui::views::status_bar;
 use crate::tui::views::styled_block;
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
@@ -197,17 +198,7 @@ fn truncate_str(s: &str, max_width: usize) -> String {
 
 /// Render the bottom hint bar with keybinding shortcuts and status info.
 fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
-    let status_line = if app.loading {
-        Line::from(Span::styled(
-            "  Refreshing...",
-            Style::default().fg(Color::DarkGray),
-        ))
-    } else if app.is_offline {
-        Line::from(Span::styled("  [OFFLINE]", Style::default().fg(Color::Red)))
-    } else {
-        // Placeholder staleness info — full implementation in Step 4.4.
-        Line::from(Span::styled("", Style::default()))
-    };
+    let status_line = status_bar::build_status_line(app);
 
     let hints = Line::from(vec![
         Span::styled("  ↑/↓", Style::default().fg(Color::White)),

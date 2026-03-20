@@ -514,7 +514,7 @@ list.rs). New/modified files:
 
 ---
 
-### Step 4.4 — Status bar
+### Step 4.4 — Status bar ✅
 
 Implement the bottom status bar.
 
@@ -528,6 +528,42 @@ Implement the bottom status bar.
 
 **Acceptance criteria:** Status bar renders correctly in all four states.
 Staleness text updates reflect cache age. Config toggles work.
+
+**Status:** Complete. 20 new tests (252 total). New/modified files:
+
+- `src/tui/views/status_bar.rs` — `build_status_line()` returns a styled
+  `Line` for the status bar. Four states: refreshing (`"Refreshing..."`),
+  offline (`"Updated Xm ago (stale) • [OFFLINE]"`), stale (`"Updated Xh ago
+  (stale) • Press 'r' to refresh"`), fresh (`"Updated Xm ago • Next refresh
+  after HH:MM UTC"`). Respects `staleness_style` config (`"relative"` →
+  `"Updated 5m ago"`, `"absolute"` → `"Last updated 10:40 AM UTC"`) and
+  `time_format` config (`"12h"` → `"10:45 AM"`, `"24h"` → `"10:45"`).
+- `src/tui/time_fmt.rs` — Added `format_time_of_day()` for absolute time
+  display (12h with AM/PM or 24h). 8 new tests covering morning/afternoon/
+  midnight/noon for both formats plus unknown format fallback.
+- `src/tui/app.rs` — Added `cache_fetched_at`, `cache_expires_at`
+  (`Option<DateTime<Utc>>`) and `ui_config` (`UiConfig`) fields to `App`.
+- `src/tui/views/list.rs` — Replaced placeholder staleness line in
+  `render_hint_bar()` with `status_bar::build_status_line()`.
+- `src/tui/views/mod.rs` — Added `pub mod status_bar`.
+- `src/main.rs` — Populates `cache_fetched_at`, `cache_expires_at`, and
+  `ui_config` from loaded cache and config.
+- Tests cover: all four status states (refreshing, offline with/without cache,
+  stale, fresh), relative vs absolute staleness style, 12h vs 24h time format,
+  no cache metadata, state priority (loading overrides stale, offline overrides
+  stale). clippy clean (only pre-existing dead-code warnings).
+
+---
+
+## Break 2: Reflection
+
+Use plan mode or any brainstorming and code review skills to reflect on the design decisions and implementation for phases 3 and 4. It is important we do this to fix issues early and stop us fighting an uphill battle later when the logic becomes larger and more complex to change.
+
+**Discuss:**
+- Are there still any open questions or design gaps for the steps we have implemented so far? Think about the design logic - are there any decisions we've made that don't make sense (overcomplicated, or too many assumptions)?
+- Do current tests adequately appraise the expected behaviour of the TUI, list view and api request handling? Can we trust that all tests passing means these functions of the app are working?
+- Looking ahead to the next phases, can you forsee any issues with how the new logic we will implement will interface with the logic we have already completed?
+- Anything else you need to be explained, or want to discuss?
 
 ---
 

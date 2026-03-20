@@ -145,6 +145,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.rate_limit_total = Some(limiter.limit() as u32);
     }
 
+    // Populate cache staleness metadata and UI config for the status bar.
+    if let Some(ref cache) = cached_list {
+        app.cache_fetched_at = Some(cache.fetched_at);
+        app.cache_expires_at = Some(cache.expires_at);
+    }
+    app.ui_config = config.ui.clone();
+
     // 8. If we need to fetch, start the request and mark as loading.
     let pending_fetch: Option<Pin<Box<dyn std::future::Future<Output = FetchResult> + Send>>> =
         if needs_fetch {

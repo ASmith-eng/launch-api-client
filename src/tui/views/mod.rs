@@ -1,6 +1,7 @@
 //! TUI view renderers (list, detail, filter, help).
 
 pub mod list;
+pub mod status_bar;
 
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, BorderType, Borders};
