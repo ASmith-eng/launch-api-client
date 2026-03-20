@@ -469,7 +469,7 @@ the design doc mockup.
 
 ---
 
-### Step 4.3 — Time display and net precision
+### Step 4.3 — Time display and net precision ✅
 
 Implement the time formatting logic used across views.
 
@@ -486,6 +486,31 @@ Implement the time formatting logic used across views.
 **Acceptance criteria:** Unit tests for each precision level. Tests for
 timezone conversion using known IANA zones. Countdown formats correctly for
 various time deltas.
+
+**Status:** Complete. 40 new tests (232 total, net +34 after moving 6 from
+list.rs). New/modified files:
+
+- `src/tui/time_fmt.rs` — Shared time formatting module with:
+  `format_net_time()` — precision-aware display (Month → "Sep 2026",
+  Year → "2026", Day → "Feb 28, 2026", Hour/Minute → dual timezone).
+  `format_dual_timezone()` — `Feb 28 03:00 CST / 09:00 UTC` using chrono-tz,
+  falls back to UTC on missing/invalid timezone.
+  `has_precise_time()` — precision gating for countdown (Month/Year → false).
+  `format_countdown()` — `T-dd days, hh:mm:ss` for future, `T+` for past;
+  omits days component when < 1 day.
+  `countdown_style()` — proximity-based styling: >7d dim white, 1–7d normal
+  white, <24h yellow bold, <1h red bold, T+ cyan bold.
+  `format_relative_time()` — "just now", "5m ago", "2h ago", "3d ago".
+- `src/tui/mod.rs` — Added `pub mod time_fmt`.
+- `src/tui/views/list.rs` — Refactored to use `time_fmt::format_net_time()`
+  instead of inline formatting. Removed 6 duplicate time tests (now in
+  time_fmt.rs with broader coverage).
+- Tests cover: all 4 precision levels × multiple timezones (Chicago, New York,
+  Tokyo, UTC), invalid timezone fallback, countdown (future with/without days,
+  past/in-flight, exact zero, exactly 1 day, large values), all 5 countdown
+  style tiers + boundary values (exactly 7d, 24h, 1h), relative time (just now,
+  minutes, hours, days, future-as-just-now, boundary values 60s/1h/1d/59m/23h).
+  clippy clean.
 
 ---
 

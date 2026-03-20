@@ -4,8 +4,6 @@
 //! info, and time display. Each launch occupies two content lines plus one
 //! blank separator line.
 
-use chrono::{DateTime, Utc};
-use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -13,6 +11,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::models::LaunchSummary;
 use crate::tui::app::App;
+use crate::tui::time_fmt;
 use crate::tui::views::styled_block;
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
@@ -115,7 +114,7 @@ fn build_name_line(launch: &LaunchSummary, selected: bool, width: u16) -> Line<'
     let name = launch.name.clone();
 
     // Format time based on net_precision.
-    let time_str = format_net_time(
+    let time_str = time_fmt::format_net_time(
         &launch.net,
         launch.net_precision.as_ref(),
         &launch.pad.location.timezone_name,
@@ -181,48 +180,6 @@ fn build_status_badge(status: &crate::models::LaunchStatus) -> (String, Style) {
         Some(ss) => (format!("[{}]", ss.abbrev), ss.style),
         None => (format!("[{}]", status.abbrev), unknown_status_style()),
     }
-}
-
-/// Format the NET time according to precision.
-///
-/// - Hour/Minute precision: `Feb 28 03:00 CST / 09:00 UTC`
-/// - Day precision: `Feb 28, 2026`
-/// - Month precision: `Mar 2026`
-/// - Year precision: `2026`
-/// - No precision: full datetime in UTC
-fn format_net_time(
-    net: &DateTime<Utc>,
-    precision: Option<&crate::models::NetPrecision>,
-    timezone_name: &Option<String>,
-) -> String {
-    let abbrev = precision.map(|p| p.abbrev.as_str()).unwrap_or("");
-
-    match abbrev {
-        "Month" => net.format("%b %Y").to_string(),
-        "Year" => net.format("%Y").to_string(),
-        "Day" => net.format("%b %d, %Y").to_string(),
-        _ => {
-            // Hour/Minute precision or unknown — show dual timezone.
-            format_dual_timezone(net, timezone_name)
-        }
-    }
-}
-
-/// Format a datetime as dual timezone: `Feb 28 03:00 CST / 09:00 UTC`.
-fn format_dual_timezone(net: &DateTime<Utc>, timezone_name: &Option<String>) -> String {
-    let utc_str = net.format("%H:%M UTC").to_string();
-
-    if let Some(tz_name) = timezone_name {
-        if let Ok(tz) = tz_name.parse::<Tz>() {
-            let local = net.with_timezone(&tz);
-            let tz_abbrev = local.format("%Z").to_string();
-            let local_str = local.format("%b %d %H:%M").to_string();
-            return format!("{local_str} {tz_abbrev} / {utc_str}");
-        }
-    }
-
-    // Fallback: just UTC.
-    net.format("%b %d %H:%M UTC").to_string()
 }
 
 /// Truncate a string to fit within `max_width` characters, appending `…` if needed.
@@ -355,71 +312,6 @@ mod tests {
     #[test]
     fn truncate_needs_ellipsis() {
         assert_eq!(truncate_str("hello world", 6), "hello…");
-    }
-
-    #[test]
-    fn format_net_month_precision() {
-        let net: DateTime<Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
-        let precision = crate::models::NetPrecision {
-            id: 3,
-            name: "Month".into(),
-            abbrev: "Month".into(),
-        };
-        assert_eq!(format_net_time(&net, Some(&precision), &None), "Sep 2026");
-    }
-
-    #[test]
-    fn format_net_year_precision() {
-        let net: DateTime<Utc> = "2027-01-01T00:00:00Z".parse().unwrap();
-        let precision = crate::models::NetPrecision {
-            id: 4,
-            name: "Year".into(),
-            abbrev: "Year".into(),
-        };
-        assert_eq!(format_net_time(&net, Some(&precision), &None), "2027");
-    }
-
-    #[test]
-    fn format_net_day_precision() {
-        let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        let precision = crate::models::NetPrecision {
-            id: 1,
-            name: "Day".into(),
-            abbrev: "Day".into(),
-        };
-        assert_eq!(
-            format_net_time(&net, Some(&precision), &None),
-            "Feb 28, 2026"
-        );
-    }
-
-    #[test]
-    fn format_net_hour_precision_with_timezone() {
-        let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        let precision = crate::models::NetPrecision {
-            id: 0,
-            name: "Hour".into(),
-            abbrev: "Hour".into(),
-        };
-        let tz = Some("America/Chicago".to_string());
-        let result = format_net_time(&net, Some(&precision), &tz);
-        // CST = UTC-6, so 09:00 UTC = 03:00 CST.
-        assert_eq!(result, "Feb 28 03:00 CST / 09:00 UTC");
-    }
-
-    #[test]
-    fn format_net_no_precision_fallback_utc() {
-        let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        let result = format_net_time(&net, None, &None);
-        assert_eq!(result, "Feb 28 09:00 UTC");
-    }
-
-    #[test]
-    fn format_net_invalid_timezone_falls_back() {
-        let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        let tz = Some("Not/A/Timezone".to_string());
-        let result = format_net_time(&net, None, &tz);
-        assert_eq!(result, "Feb 28 09:00 UTC");
     }
 
     #[test]
