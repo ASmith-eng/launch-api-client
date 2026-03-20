@@ -138,6 +138,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.launches = initial_launches;
     app.total_count = initial_total;
 
+    // Populate rate limit display from current limiter state.
+    {
+        let mut limiter = api_client.rate_limiter();
+        app.rate_limit_remaining = Some(limiter.remaining() as u32);
+        app.rate_limit_total = Some(limiter.limit() as u32);
+    }
+
     // 8. If we need to fetch, start the request and mark as loading.
     let pending_fetch: Option<Pin<Box<dyn std::future::Future<Output = FetchResult> + Send>>> =
         if needs_fetch {

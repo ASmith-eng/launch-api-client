@@ -424,7 +424,7 @@ clippy clean (only pre-existing dead-code warnings from unused-yet pub items).
 
 ---
 
-### Step 4.2 — List view rendering
+### Step 4.2 — List view rendering ✅
 
 Render the launch list with navigation.
 
@@ -442,6 +442,30 @@ Render the launch list with navigation.
 **Acceptance criteria:** `cargo run` displays cached (or freshly fetched)
 launches in a scrollable list. Arrow keys navigate. Visual output matches
 the design doc mockup.
+
+**Status:** Complete. 17 new tests (198 total). New/modified files:
+
+- `src/tui/views/mod.rs` — `styled_block()` helper using `BorderType::Rounded`
+  with `DarkGray` border. Re-exports `list` module.
+- `src/tui/views/list.rs` — Full list view renderer: `render_list()` with
+  scrollable launch items (2 lines per item + blank separator), status badges
+  colored via `status_style()`, dual timezone time display (location tz / UTC)
+  using `chrono-tz`, net precision awareness (Month → "Sep 2026", Year → "2026",
+  Day → "Feb 28, 2026", Hour/Minute → full dual tz), name truncation with
+  ellipsis, `▸` selection marker with bold white, provider | location line in
+  gray. `compute_scroll_offset()` keeps selected item visible. Bottom hint bar
+  with keybinding shortcuts. Loading/empty/offline states handled.
+- `src/tui/app.rs` — Added `rate_limit_remaining: Option<u32>` and
+  `rate_limit_total: Option<u32>` fields for title bar display.
+- `src/tui/event.rs` — Replaced `render_list_placeholder()` with
+  `list::render_list()`. Added `update_list_scroll()` called after every
+  navigation key to keep scroll offset in sync.
+- `src/main.rs` — Populates rate limit display fields from `Ll2Client`'s
+  rate limiter state after throttle sync.
+- Tests cover: scroll offset (empty, no-scroll, above/below window, clamped,
+  all-visible), string truncation (short, exact, ellipsis), net time formatting
+  (month, year, day, hour+timezone, no precision, invalid timezone), status
+  badge rendering (known + unknown IDs). clippy clean.
 
 ---
 

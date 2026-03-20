@@ -18,6 +18,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use crate::error::{AppError, ErrorState};
 use crate::tui::app::{App, AppScreen, MIN_COLS, MIN_ROWS};
 use crate::tui::terminal::Tui;
+use crate::tui::views::list::{self, compute_scroll_offset};
 
 /// Duration after which a transient error is auto-dismissed (10 seconds).
 const TRANSIENT_DISMISS_SECS: u64 = 10;
@@ -167,19 +168,23 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Char('k') => {
             if app.selected_index > 0 {
                 app.selected_index -= 1;
+                update_list_scroll(app);
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if !app.launches.is_empty() && app.selected_index < app.launches.len() - 1 {
                 app.selected_index += 1;
+                update_list_scroll(app);
             }
         }
         KeyCode::Home => {
             app.selected_index = 0;
+            update_list_scroll(app);
         }
         KeyCode::End => {
             if !app.launches.is_empty() {
                 app.selected_index = app.launches.len() - 1;
+                update_list_scroll(app);
             }
         }
         KeyCode::Enter => {
@@ -192,6 +197,20 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
         }
         _ => {}
     }
+}
+
+/// Update the list scroll offset after a selection change.
+fn update_list_scroll(app: &mut App) {
+    // Estimate visible items from terminal height. The list area is roughly
+    // terminal height minus outer block borders (2) minus hint bar (2).
+    let list_height = (app.terminal_size.1 as usize).saturating_sub(4);
+    let max_visible = list_height / 3; // each item is ~3 lines
+    app.list_scroll_offset = compute_scroll_offset(
+        app.selected_index,
+        app.list_scroll_offset,
+        max_visible,
+        app.launches.len(),
+    );
 }
 
 /// Handle keys in the detail view.
@@ -241,12 +260,12 @@ fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
             }
 
             match &app.screen {
-                AppScreen::List => render_list_placeholder(frame, area, app),
+                AppScreen::List => list::render_list(frame, area, app),
                 AppScreen::Detail(id) => render_detail_placeholder(frame, area, id, app),
                 AppScreen::Help(prev) => {
                     // Render the underlying screen first, then overlay help.
                     match prev.as_ref() {
-                        AppScreen::List => render_list_placeholder(frame, area, app),
+                        AppScreen::List => list::render_list(frame, area, app),
                         AppScreen::Detail(id) => {
                             render_detail_placeholder(frame, area, id, app);
                         }
@@ -254,7 +273,7 @@ fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
                     }
                     render_help_overlay(frame, area);
                 }
-                AppScreen::FilterPanel => render_list_placeholder(frame, area, app),
+                AppScreen::FilterPanel => list::render_list(frame, area, app),
             }
 
             // Render error state overlay if present.
@@ -290,43 +309,6 @@ fn render_size_warning(frame: &mut ratatui::Frame, area: Rect) {
     let popup = centered_rect(42, 8, area);
     frame.render_widget(Clear, popup);
     frame.render_widget(paragraph, popup);
-}
-
-/// Placeholder list view rendering (full implementation in Step 4.2).
-fn render_list_placeholder(frame: &mut ratatui::Frame, area: Rect, app: &App) {
-    let title = if app.loading {
-        " Fetching launches... "
-    } else {
-        &format!(
-            " Launches — Showing {} of {} ",
-            app.launches.len(),
-            app.total_count
-        )
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(title);
-
-    let content = if app.loading {
-        "Fetching launches...".to_string()
-    } else if app.launches.is_empty() {
-        "No launches to display.".to_string()
-    } else {
-        app.launches
-            .iter()
-            .enumerate()
-            .map(|(i, launch)| {
-                let marker = if i == app.selected_index { "▸ " } else { "  " };
-                format!("{marker}{}", launch.name)
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
 }
 
 /// Placeholder detail view rendering (full implementation in Step 5.1).

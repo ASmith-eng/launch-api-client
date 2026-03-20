@@ -66,6 +66,10 @@ pub struct App {
     pub terminal_size: (u16, u16),
     /// Total count of launches from the API (may differ from `launches.len()`).
     pub total_count: u32,
+    /// Remaining API requests in the current rate limit window.
+    pub rate_limit_remaining: Option<u32>,
+    /// Total API request limit for the current window.
+    pub rate_limit_total: Option<u32>,
     /// Whether the app should exit on the next loop iteration.
     pub should_quit: bool,
 }
@@ -86,6 +90,8 @@ impl App {
             filter_state: FilterState::default(),
             terminal_size,
             total_count: 0,
+            rate_limit_remaining: None,
+            rate_limit_total: None,
             should_quit: false,
         }
     }
