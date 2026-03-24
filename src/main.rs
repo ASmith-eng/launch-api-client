@@ -8,22 +8,20 @@ mod models;
 mod tui;
 mod vendor;
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::Utc;
 use tracing::{info, warn};
 
-use api::client::{LaunchApi, LaunchListResponse, Ll2Client};
+use api::client::Ll2Client;
 use api::rate_limiter::RateLimiter;
 use cache::CacheManager;
 use clock::{Clock, SystemClock};
 use config::{load_config, AppDirs};
 use models::{AppState, CACHE_VERSION};
 use tui::app::App;
-use tui::event::{run_event_loop, FetchResult};
+use tui::event::run_event_loop;
 use tui::terminal::{install_panic_hook, setup_terminal};
-use vendor::launch_library_2::endpoints::ListParams;
 
 #[tokio::main]
 async fn main() {
@@ -109,27 +107,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         warn!(error = %e, "startup throttle sync failed, continuing with local tracking");
     }
 
-    // 6. Load launch list from cache or prepare to fetch.
+    // 6. Load launch list from cache.
     let cached_list = cache_manager.load_launch_list().unwrap_or_else(|e| {
         warn!(error = %e, "failed to load cache.json");
         None
     });
 
-    let (initial_launches, initial_total, needs_fetch) = match cached_list {
+    let needs_refresh = match cached_list {
         Some(ref cache) if !cache.is_stale(clock.now()) => {
             info!(
                 count = cache.launches.len(),
                 "loaded fresh launch list from cache"
             );
-            (cache.launches.clone(), cache.total_count, false)
+            false
         }
-        Some(ref cache) => {
+        Some(_) => {
             info!("cached launch list is stale, will re-fetch");
-            (cache.launches.clone(), cache.total_count, true)
+            true
         }
         None => {
             info!("no cached launch list, will fetch");
-            (vec![], 0, true)
+            false // Empty list triggers auto-fetch via event loop state check.
         }
     };
 
@@ -139,8 +137,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let size = terminal.size()?;
     let mut app = App::new((size.width, size.height));
-    app.launches = initial_launches;
-    app.total_count = initial_total;
+
+    // Populate app with cached data (if any).
+    if let Some(ref cache) = cached_list {
+        app.launches = cache.launches.clone();
+        app.total_count = cache.total_count;
+        app.cache_fetched_at = Some(cache.fetched_at);
+        app.cache_expires_at = Some(cache.expires_at);
+    }
 
     // Populate rate limit display from current limiter state.
     {
@@ -149,39 +153,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.rate_limit_total = Some(limiter.limit() as u32);
     }
 
-    // Populate cache staleness metadata and UI config for the status bar.
-    if let Some(ref cache) = cached_list {
-        app.cache_fetched_at = Some(cache.fetched_at);
-        app.cache_expires_at = Some(cache.expires_at);
-    }
     app.ui_config = config.ui.clone();
+    app.launches_per_page = config.ui.launches_per_page;
 
-    // 8. If we need to fetch, start the request and mark as loading.
-    let pending_fetch: Option<Pin<Box<dyn std::future::Future<Output = FetchResult> + Send>>> =
-        if needs_fetch {
-            app.loading = true;
-            let params = ListParams {
-                limit: config.ui.launches_per_page,
-                ..Default::default()
-            };
-            let client_clone = Arc::clone(&api_client);
-            Some(Box::pin(fetch_launch_list(client_clone, params)))
-        } else {
-            None
-        };
+    // If cache is stale, signal the event loop to refresh on first iteration.
+    if needs_refresh {
+        app.refresh_requested = true;
+    }
 
-    // 9. Run the event loop.
+    // 8. Run the event loop (drives all fetching based on app state).
     let result = run_event_loop(
         &mut terminal,
         &mut app,
         Arc::clone(&api_client),
         &cache_manager,
         &config.cache,
-        pending_fetch,
     )
     .await;
 
-    // 10. Save app state on exit, including current rate limit state.
+    // 9. Save app state on exit, including current rate limit state.
     {
         let limiter = api_client.rate_limiter();
         app_state.rate_limit = limiter.to_state();
@@ -193,21 +183,4 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // _guard dropped here → terminal restored.
     result.map_err(Into::into)
-}
-
-/// Fetch the launch list, returning a [`FetchResult`] for the event loop.
-async fn fetch_launch_list<C: clock::Clock + Send + Sync + 'static>(
-    client: Arc<Ll2Client<C>>,
-    params: ListParams,
-) -> FetchResult {
-    match client.fetch_launch_list(&params).await {
-        Ok(LaunchListResponse {
-            launches,
-            total_count,
-        }) => FetchResult::LaunchList {
-            launches,
-            total_count,
-        },
-        Err(e) => FetchResult::Error(e),
-    }
 }

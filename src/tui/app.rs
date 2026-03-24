@@ -79,6 +79,10 @@ pub struct App {
     pub cache_expires_at: Option<DateTime<Utc>>,
     /// UI display configuration (time format, staleness style).
     pub ui_config: UiConfig,
+    /// Number of launches per page for API requests.
+    pub launches_per_page: u32,
+    /// Whether the user has requested a manual refresh (`r` key).
+    pub refresh_requested: bool,
     /// Whether the app should exit on the next loop iteration.
     pub should_quit: bool,
 }
@@ -104,6 +108,8 @@ impl App {
             cache_fetched_at: None,
             cache_expires_at: None,
             ui_config: UiConfig::default(),
+            launches_per_page: 25,
+            refresh_requested: false,
             should_quit: false,
         }
     }

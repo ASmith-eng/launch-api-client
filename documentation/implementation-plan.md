@@ -555,7 +555,7 @@ Staleness text updates reflect cache age. Config toggles work.
 
 ---
 
-## Break 2: Reflection
+## Break 2: Reflection ✅
 
 Use plan mode or any brainstorming and code review skills to reflect on the design decisions and implementation for phases 3 and 4. It is important we do this to fix issues early and stop us fighting an uphill battle later when the logic becomes larger and more complex to change.
 
@@ -607,7 +607,7 @@ Use plan mode or any brainstorming and code review skills to reflect on the desi
 
 ---
 
-### Break 2.2 — Pre-Phase 5 refactoring
+### Break 2.2 — Pre-Phase 5 refactoring ✅
 
 Address structural issues identified in Break 2 that would block or complicate
 Phase 5 implementation.
@@ -660,7 +660,7 @@ render errors use `AppError::Io`, not `AppError::CacheIo`.
 
 ## Phase 5: TUI — Detail View & Data Flow
 
-### Step 5.1 — Detail view rendering
+### Step 5.1 — Detail view rendering ✅
 
 Render the full launch detail screen.
 
@@ -685,9 +685,20 @@ detail view. Content matches the design doc mockup. Scrolling works and
 is clamped to content bounds. Esc returns to list. Responsive layout
 switches at 100 columns.
 
+**Status:** Complete. 24 new tests (286 total). `src/tui/views/detail.rs`
+implements full detail view: hero header with status-colored `██` badges
+and countdown timer, NET time with dual timezone, launch window/probability/
+weather, two-column vehicle/provider + location grid (responsive single-column
+fallback < 100 cols), provider record bar (`█`/`░` scaled to 20 chars),
+mission section with word-wrapped description, links section with cyan labels
+and dim underline URLs, dark gray dim `━` separators, vertical scrolling with
+`┃`/`│` scroll indicator, scroll clamping to content bounds. Placeholder
+removed from event.rs and replaced with real renderer. `clamp_scroll()` helper
+exported for use by event loop in Step 5.2.
+
 ---
 
-### Step 5.2 — Data fetching integration
+### Step 5.2 — Data fetching integration ✅
 
 Wire up API calls to user actions with loading/error states. Relies on the
 `Arc<Client>` and `CacheManager` access established in Break 2.2.
@@ -717,6 +728,25 @@ Detail fetch triggers on Enter. Refresh only works when stale.
 `ErrorState::Transient` displays and auto-dismisses. `ErrorState::RateLimited`
 disables refresh and shows reset time. `ErrorState::Offline` shows indicator.
 Fetched data is persisted to cache via `CacheManager`.
+
+**Status:** Complete. 16 new tests (302 total). Unified state-driven fetch
+dispatch in event loop — all fetch decisions driven by screen state instead
+of individual key handler actions:
+- `check_needs_fetch()` inspects current screen + app state each iteration:
+  - List with empty data → auto-fetch (first run)
+  - Detail with missing/stale cache → auto-fetch on navigation
+  - `refresh_requested` flag → validated against staleness + rate limit
+- `FetchKind` enum (LaunchList / LaunchDetail) + `spawn_fetch()` for dispatch
+- `maybe_load_detail_from_disk()` loads disk-cached details into memory
+- `handle_fetch_result()` now caches details: `CacheStrategy::for_launch()`
+  for TTL, persists to disk via `CacheManager`, stores in `app.detail_cache`
+- `r` key wired in both list and detail views (sets `refresh_requested`)
+- `pending_fetch` parameter removed from `run_event_loop()` — event loop
+  owns all fetch lifecycle
+- `main.rs` simplified: loads cached data into App, sets `refresh_requested`
+  for stale startup cache, enters event loop
+- `App` gains `launches_per_page` and `refresh_requested` fields
+- Help overlay updated with `r: Refresh` keybinding
 
 ---
 
