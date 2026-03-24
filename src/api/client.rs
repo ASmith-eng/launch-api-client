@@ -305,7 +305,7 @@ mod tests {
                 "status": { "id": 1, "name": "Go for Launch", "abbrev": "Go" },
                 "launch_service_provider": {
                     "name": "SpaceX",
-                    "type": { "name": "Commercial" }
+                    "type": "Commercial"
                 },
                 "pad": {
                     "name": "OLM A",
@@ -336,7 +336,7 @@ mod tests {
         "image": { "id": 1, "image_url": "https://example.com/img.jpg" },
         "launch_service_provider": {
             "name": "SpaceX",
-            "type": { "name": "Commercial" },
+            "type": "Commercial",
             "total_launch_count": 301,
             "successful_launches": 295,
             "failed_launches": 6

@@ -2,7 +2,7 @@
 
 use crate::models::{
     CountryInfo, LaunchDetail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
-    NetPrecision, OrbitInfo, PadInfo, Provider, ProviderType, ThrottleStatus, UrlEntry,
+    NetPrecision, OrbitInfo, PadInfo, Provider, ThrottleStatus, UrlEntry,
 };
 
 use super::response_models::{
@@ -52,7 +52,7 @@ impl From<Ll2Provider> for Provider {
     fn from(ll2: Ll2Provider) -> Self {
         Self {
             name: ll2.name,
-            provider_type: ll2.provider_type.map(|t| ProviderType { name: t.name }),
+            provider_type: ll2.provider_type,
         }
     }
 }
@@ -138,10 +138,7 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             image_url,
             launch_service_provider: Provider {
                 name: ll2.launch_service_provider.name.clone(),
-                provider_type: ll2
-                    .launch_service_provider
-                    .provider_type
-                    .map(|t| ProviderType { name: t.name }),
+                provider_type: ll2.launch_service_provider.provider_type.clone(),
             },
             provider_total_launches: ll2.launch_service_provider.total_launch_count,
             provider_successful_launches: ll2.launch_service_provider.successful_launches,
@@ -171,7 +168,7 @@ impl From<Ll2ProviderDetail> for Provider {
     fn from(ll2: Ll2ProviderDetail) -> Self {
         Self {
             name: ll2.name,
-            provider_type: ll2.provider_type.map(|t| ProviderType { name: t.name }),
+            provider_type: ll2.provider_type,
         }
     }
 }
@@ -219,9 +216,7 @@ mod tests {
             },
             launch_service_provider: Ll2Provider {
                 name: "SpaceX".into(),
-                provider_type: Some(Ll2ProviderType {
-                    name: "Commercial".into(),
-                }),
+                provider_type: Some("Commercial".into()),
             },
             pad: Ll2Pad {
                 name: Some("Orbital Launch Mount A".into()),
@@ -258,8 +253,8 @@ mod tests {
         assert_eq!(summary.status.abbrev, "Go");
         assert_eq!(summary.launch_service_provider.name, "SpaceX");
         assert_eq!(
-            summary.launch_service_provider.provider_type.as_ref().unwrap().name,
-            "Commercial"
+            summary.launch_service_provider.provider_type.as_deref(),
+            Some("Commercial")
         );
         assert_eq!(summary.pad.location.name, "Starbase, Texas");
         assert_eq!(
@@ -351,9 +346,7 @@ mod tests {
             }),
             launch_service_provider: Ll2ProviderDetail {
                 name: "SpaceX".into(),
-                provider_type: Some(Ll2ProviderType {
-                    name: "Commercial".into(),
-                }),
+                provider_type: Some("Commercial".into()),
                 total_launch_count: Some(301),
                 successful_launches: Some(295),
                 failed_launches: Some(6),

@@ -36,13 +36,7 @@ pub struct NetPrecision {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
     pub name: String,
-    pub provider_type: Option<ProviderType>,
-}
-
-/// Provider classification (e.g. "Commercial", "Government").
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderType {
-    pub name: String,
+    pub provider_type: Option<String>,
 }
 
 /// Launch pad information.
@@ -246,7 +240,7 @@ pub(crate) mod tests {
                     "status": { "id": 1, "name": "Go for Launch", "abbrev": "Go" },
                     "launch_service_provider": {
                         "name": "SpaceX",
-                        "provider_type": { "name": "Commercial" }
+                        "provider_type": "Commercial"
                     },
                     "pad": {
                         "location": {

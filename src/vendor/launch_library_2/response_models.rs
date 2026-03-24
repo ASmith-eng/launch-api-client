@@ -49,13 +49,8 @@ pub struct Ll2NetPrecision {
 #[derive(Debug, Deserialize)]
 pub struct Ll2Provider {
     pub name: String,
-    #[serde(rename = "type")]
-    pub provider_type: Option<Ll2ProviderType>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Ll2ProviderType {
-    pub name: String,
+    #[serde(rename = "type", default)]
+    pub provider_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,8 +134,8 @@ pub struct Ll2LaunchDetail {
 #[derive(Debug, Deserialize)]
 pub struct Ll2ProviderDetail {
     pub name: String,
-    #[serde(rename = "type")]
-    pub provider_type: Option<Ll2ProviderType>,
+    #[serde(rename = "type", default)]
+    pub provider_type: Option<String>,
     #[serde(default)]
     pub total_launch_count: Option<u32>,
     #[serde(default)]
@@ -258,19 +253,14 @@ mod tests {
                 },
                 "launch_service_provider": {
                     "name": "SpaceX",
-                    "type": {
-                        "name": "Commercial"
-                    }
+                    "type": "Commercial"
                 },
                 "pad": {
                     "name": "Orbital Launch Mount A",
                     "location": {
                         "name": "Starbase, Texas",
                         "timezone_name": "America/Chicago",
-                        "country": {
-                            "name": "United States of America",
-                            "alpha_2_code": "US"
-                        }
+                        "country_code": "US"
                     }
                 },
                 "mission": {
@@ -304,8 +294,8 @@ mod tests {
         assert_eq!(launch.status.abbrev, "Go");
         assert_eq!(launch.launch_service_provider.name, "SpaceX");
         assert_eq!(
-            launch.launch_service_provider.provider_type.as_ref().unwrap().name,
-            "Commercial"
+            launch.launch_service_provider.provider_type.as_deref(),
+            Some("Commercial")
         );
         assert_eq!(launch.pad.location.name, "Starbase, Texas");
 
@@ -370,7 +360,7 @@ mod tests {
             "response_mode": "normal",
             "id": 121,
             "name": "SpaceX",
-            "type": { "id": 3, "name": "Commercial" },
+            "type": "Commercial",
             "total_launch_count": 301,
             "successful_launches": 295,
             "failed_launches": 6
