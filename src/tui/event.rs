@@ -371,14 +371,27 @@ fn handle_fetch_result<C: Clock>(
             app.detail_cache.insert(launch_id, cached);
         }
         FetchResult::Error(err) => {
+            // Always log the full error detail for debugging.
+            warn!(error = %err, error_debug = ?err, "fetch failed");
+
             if err.is_offline_signal() {
                 app.is_offline = true;
                 app.error_state = Some(ErrorState::Offline);
             } else if let AppError::RateLimited(available_at) = err {
                 app.error_state = Some(ErrorState::RateLimited { available_at });
             } else {
+                // Generic UI message — the log has the full detail.
+                let ui_message = match &err {
+                    AppError::Network(e) if e.is_decode() => {
+                        "Unexpected response from server".to_string()
+                    }
+                    AppError::ApiError { status, .. } => {
+                        format!("Server returned an error ({status})")
+                    }
+                    _ => "Something went wrong".to_string(),
+                };
                 app.error_state = Some(ErrorState::Transient {
-                    message: err.to_string(),
+                    message: ui_message,
                     dismiss_at: Instant::now()
                         + std::time::Duration::from_secs(TRANSIENT_DISMISS_SECS),
                 });

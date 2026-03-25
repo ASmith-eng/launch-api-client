@@ -119,7 +119,7 @@ pub struct Ll2LaunchDetail {
     #[serde(default)]
     pub weather_concerns: Option<String>,
     #[serde(default)]
-    pub image: Option<Ll2Image>,
+    pub image: Option<String>,
     pub launch_service_provider: Ll2ProviderDetail,
     #[serde(default)]
     pub rocket: Option<Ll2Rocket>,
@@ -128,6 +128,10 @@ pub struct Ll2LaunchDetail {
     pub mission: Option<Ll2MissionDetail>,
     #[serde(default)]
     pub program: Vec<Ll2Program>,
+    #[serde(rename = "vidURLs", default)]
+    pub vid_urls: Vec<Ll2UrlEntry>,
+    #[serde(rename = "infoURLs", default)]
+    pub info_urls: Vec<Ll2UrlEntry>,
 }
 
 /// Provider in detailed response mode (full agency with launch statistics).
@@ -182,13 +186,6 @@ pub struct Ll2UrlEntry {
     #[serde(default)]
     pub title: Option<String>,
     pub url: String,
-}
-
-/// Image object.
-#[derive(Debug, Deserialize)]
-pub struct Ll2Image {
-    #[serde(default)]
-    pub image_url: Option<String>,
 }
 
 /// Program associated with a launch.
@@ -346,12 +343,7 @@ mod tests {
         "net_precision": { "id": 1, "name": "Day", "abbrev": "Day" },
         "window_start": "2026-02-28T09:00:00Z",
         "window_end": "2026-02-28T12:00:00Z",
-        "image": {
-            "id": 1234,
-            "name": "Starship image",
-            "image_url": "https://example.com/starship.jpg",
-            "thumbnail_url": "https://example.com/starship_thumb.jpg"
-        },
+        "image": "https://example.com/starship.jpg",
         "probability": 90,
         "weather_concerns": "No concerns",
         "failreason": "",
@@ -392,15 +384,17 @@ mod tests {
             "type": "Test Flight",
             "description": "Seventh integrated flight test of the Starship system.",
             "orbit": { "id": 8, "name": "Low Earth Orbit", "abbrev": "LEO" },
-            "info_urls": [
-                { "priority": 1, "title": "SpaceX Info", "url": "https://spacex.com/ift7" }
-            ],
-            "vid_urls": [
-                { "priority": 1, "title": "Webcast", "url": "https://youtube.com/watch?v=abc", "source": "YouTube" }
-            ]
+            "info_urls": [],
+            "vid_urls": []
         },
         "program": [
             { "id": 1, "name": "Starship Development", "url": "https://example.com" }
+        ],
+        "infoURLs": [
+            { "priority": 1, "title": "SpaceX Info", "url": "https://spacex.com/ift7" }
+        ],
+        "vidURLs": [
+            { "priority": 1, "title": "Webcast", "url": "https://youtube.com/watch?v=abc", "source": "YouTube" }
         ],
         "webcast_live": false
     }"#;
@@ -416,27 +410,41 @@ mod tests {
         assert_eq!(detail.probability, Some(90));
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
         assert_eq!(
-            detail.image.as_ref().unwrap().image_url.as_deref(),
+            detail.image.as_deref(),
             Some("https://example.com/starship.jpg")
         );
 
         // Provider with launch stats
         assert_eq!(detail.launch_service_provider.name, "SpaceX");
         assert_eq!(detail.launch_service_provider.total_launch_count, Some(301));
-        assert_eq!(detail.launch_service_provider.successful_launches, Some(295));
+        assert_eq!(
+            detail.launch_service_provider.successful_launches,
+            Some(295)
+        );
         assert_eq!(detail.launch_service_provider.failed_launches, Some(6));
 
         // Rocket
-        let config = detail.rocket.as_ref().unwrap().configuration.as_ref().unwrap();
-        assert_eq!(config.full_name.as_deref(), Some("Starship (Super Heavy + Starship)"));
+        let config = detail
+            .rocket
+            .as_ref()
+            .unwrap()
+            .configuration
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            config.full_name.as_deref(),
+            Some("Starship (Super Heavy + Starship)")
+        );
 
-        // Mission with URLs
+        // Mission
         let mission = detail.mission.as_ref().unwrap();
         assert_eq!(mission.name, "Starship IFT-7");
-        assert_eq!(mission.info_urls.len(), 1);
-        assert_eq!(mission.info_urls[0].url, "https://spacex.com/ift7");
-        assert_eq!(mission.vid_urls.len(), 1);
-        assert_eq!(mission.vid_urls[0].title.as_deref(), Some("Webcast"));
+
+        // Top-level URLs (real API puts them here, not in mission)
+        assert_eq!(detail.info_urls.len(), 1);
+        assert_eq!(detail.info_urls[0].url, "https://spacex.com/ift7");
+        assert_eq!(detail.vid_urls.len(), 1);
+        assert_eq!(detail.vid_urls[0].title.as_deref(), Some("Webcast"));
 
         // Programs
         assert_eq!(detail.program.len(), 1);

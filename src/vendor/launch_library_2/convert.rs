@@ -113,14 +113,24 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             .and_then(|r| r.configuration)
             .and_then(|c| c.full_name.or(c.name));
 
-        let image_url = ll2.image.and_then(|img| img.image_url);
+        // Prefer top-level vidURLs/infoURLs (where the real data lives),
+        // falling back to mission-level urls if top-level is empty.
+        let vid_urls = if !ll2.vid_urls.is_empty() {
+            ll2.vid_urls.iter().map(UrlEntry::from).collect()
+        } else {
+            ll2.mission
+                .as_ref()
+                .map(|m| m.vid_urls.iter().map(UrlEntry::from).collect())
+                .unwrap_or_default()
+        };
 
-        let (vid_urls, info_urls) = match &ll2.mission {
-            Some(m) => (
-                m.vid_urls.iter().map(UrlEntry::from).collect(),
-                m.info_urls.iter().map(UrlEntry::from).collect(),
-            ),
-            None => (vec![], vec![]),
+        let info_urls = if !ll2.info_urls.is_empty() {
+            ll2.info_urls.iter().map(UrlEntry::from).collect()
+        } else {
+            ll2.mission
+                .as_ref()
+                .map(|m| m.info_urls.iter().map(UrlEntry::from).collect())
+                .unwrap_or_default()
         };
 
         let programs = ll2.program.into_iter().map(|p| p.name).collect();
@@ -135,7 +145,7 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             status: ll2.status.into(),
             probability: ll2.probability,
             weather_concerns: ll2.weather_concerns,
-            image_url,
+            image_url: ll2.image,
             launch_service_provider: Provider {
                 name: ll2.launch_service_provider.name.clone(),
                 provider_type: ll2.launch_service_provider.provider_type.clone(),
@@ -341,9 +351,7 @@ mod tests {
             },
             probability: Some(90),
             weather_concerns: Some("No concerns".into()),
-            image: Some(Ll2Image {
-                image_url: Some("https://example.com/starship.jpg".into()),
-            }),
+            image: Some("https://example.com/starship.jpg".into()),
             launch_service_provider: Ll2ProviderDetail {
                 name: "SpaceX".into(),
                 provider_type: Some("Commercial".into()),
@@ -377,17 +385,19 @@ mod tests {
                     name: "Low Earth Orbit".into(),
                     abbrev: "LEO".into(),
                 }),
-                info_urls: vec![Ll2UrlEntry {
-                    title: Some("SpaceX Info".into()),
-                    url: "https://spacex.com/ift7".into(),
-                }],
-                vid_urls: vec![Ll2UrlEntry {
-                    title: Some("Webcast".into()),
-                    url: "https://youtube.com/watch?v=abc".into(),
-                }],
+                info_urls: vec![],
+                vid_urls: vec![],
             }),
             program: vec![Ll2Program {
                 name: "Starship Development".into(),
+            }],
+            vid_urls: vec![Ll2UrlEntry {
+                title: Some("Webcast".into()),
+                url: "https://youtube.com/watch?v=abc".into(),
+            }],
+            info_urls: vec![Ll2UrlEntry {
+                title: Some("SpaceX Info".into()),
+                url: "https://spacex.com/ift7".into(),
             }],
         }
     }
@@ -455,6 +465,8 @@ mod tests {
             },
             mission: None,
             program: vec![],
+            vid_urls: vec![],
+            info_urls: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();
@@ -508,6 +520,8 @@ mod tests {
             },
             mission: None,
             program: vec![],
+            vid_urls: vec![],
+            info_urls: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();

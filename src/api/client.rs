@@ -333,7 +333,7 @@ mod tests {
         "status": { "id": 1, "name": "Go for Launch", "abbrev": "Go" },
         "probability": 90,
         "weather_concerns": "No concerns",
-        "image": { "id": 1, "image_url": "https://example.com/img.jpg" },
+        "image": "https://example.com/img.jpg",
         "launch_service_provider": {
             "name": "SpaceX",
             "type": "Commercial",
@@ -361,10 +361,12 @@ mod tests {
             "type": "Test Flight",
             "description": "Seventh flight test.",
             "orbit": { "id": 8, "name": "Low Earth Orbit", "abbrev": "LEO" },
-            "info_urls": [{ "title": "Info", "url": "https://spacex.com/ift7" }],
-            "vid_urls": [{ "title": "Webcast", "url": "https://youtube.com/watch?v=abc" }]
+            "info_urls": [],
+            "vid_urls": []
         },
-        "program": [{ "name": "Starship Development" }]
+        "program": [{ "name": "Starship Development" }],
+        "infoURLs": [{ "title": "Info", "url": "https://spacex.com/ift7" }],
+        "vidURLs": [{ "title": "Webcast", "url": "https://youtube.com/watch?v=abc" }]
     }"#;
 
     const SAMPLE_THROTTLE_RESPONSE: &str = r#"{
