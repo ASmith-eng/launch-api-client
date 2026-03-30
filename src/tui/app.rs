@@ -1,15 +1,16 @@
 //! Application state machine and core types for the TUI.
 //!
 //! The [`App`] struct holds all runtime state. [`AppScreen`] encodes which view
-//! is active, and [`FilterState`] tracks the inline filter panel.
+//! is active. Filter types live in [`super::filter`].
 
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
 use crate::config::UiConfig;
-use crate::models::{LaunchDetailCache, LaunchSummary};
 use crate::error::ErrorState;
+use crate::models::{LaunchDetailCache, LaunchSummary};
+use crate::tui::filter::FilterState;
 
 /// Minimum terminal width required for rendering.
 pub const MIN_COLS: u16 = 80;
@@ -27,19 +28,6 @@ pub enum AppScreen {
     Help(Box<AppScreen>),
     /// Inline filter panel.
     FilterPanel,
-}
-
-/// Filter state for the inline filter panel.
-#[derive(Debug, Clone, Default)]
-pub struct FilterState {
-    /// Which filter category is currently focused.
-    pub active_category: usize,
-    /// Selected status IDs to filter by.
-    pub status: Option<Vec<u32>>,
-    /// Selected region (`pad__location` value).
-    pub region: Option<String>,
-    /// Whether to filter for crewed missions.
-    pub is_crewed: Option<bool>,
 }
 
 /// All runtime state for the TUI application.
@@ -63,8 +51,10 @@ pub struct App {
     pub error_state: Option<ErrorState>,
     /// Whether the app believes the network is unreachable.
     pub is_offline: bool,
-    /// Filter panel state.
+    /// Applied filter state (used for fetch dispatch).
     pub filter_state: FilterState,
+    /// In-progress filter edits (populated only while FilterPanel is open).
+    pub editing_filter: Option<FilterState>,
     /// Current terminal dimensions (columns, rows).
     pub terminal_size: (u16, u16),
     /// Total count of launches from the API (may differ from `launches.len()`).
@@ -101,6 +91,7 @@ impl App {
             error_state: None,
             is_offline: false,
             filter_state: FilterState::default(),
+            editing_filter: None,
             terminal_size,
             total_count: 0,
             rate_limit_remaining: None,

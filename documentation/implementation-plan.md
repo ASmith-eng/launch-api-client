@@ -752,7 +752,7 @@ of individual key handler actions:
 
 ## Phase 6: Filtering & Help
 
-### Step 6.1 — Filter panel
+### Step 6.1 — Filter panel ✅
 
 Implement the inline filter UI and server-side filtering.
 
@@ -771,6 +771,23 @@ Implement the inline filter UI and server-side filtering.
 Applying a filter triggers a new API request with correct query parameters.
 Esc reverts. Results update in the list view.
 
+**Status:** Complete. 18 new tests (324 total).
+- `src/tui/filter.rs` — Filter enums (`StatusFilter`, `RegionFilter`,
+  `CrewedFilter`, `DateRangeFilter`) with `label()`, `next()`, `prev()`,
+  and API param conversion methods. `FilterState` with `cycle_next/prev()`,
+  `next_category()`, `has_active_filters()`, `apply_to_params()`.
+- `src/tui/views/filter.rs` — `render_filter_panel()` overlay with
+  category line (active category highlighted with arrow indicators) and
+  key hint bar.
+- `src/tui/event.rs` — `f` key opens filter panel (snapshots state via
+  `editing_filter`). Full `handle_filter_key()`: Tab cycles categories,
+  Left/Right/h/l cycle values, Enter applies (clears launches to trigger
+  re-fetch), Esc cancels (discards edits). `spawn_fetch()` applies
+  `filter_state` to `ListParams` via `apply_to_params()`.
+- `src/tui/views/list.rs` — Title shows `[Filtered]` when filters active.
+- `src/tui/app.rs` — Slimmed to App/AppScreen only; filter types moved
+  to `tui::filter` module. Added `editing_filter: Option<FilterState>`.
+
 ---
 
 ### Step 6.2 — Help overlay
@@ -787,6 +804,32 @@ Implement the context-aware help popup.
 **Acceptance criteria:** `?` shows context-appropriate help. Pressing `?`
 or `Esc` dismisses it. Underlying view is not interactive while help is
 shown.
+
+---
+
+### Break 3.1 — Event loop modularisation
+
+`src/tui/event.rs` has grown to ~1 170 lines and handles four distinct
+concerns: the async event loop, fetch dispatch/result handling, key
+handling, and render dispatch. Split it into focused modules:
+
+- `tui/event.rs` — slim orchestrator: the `run_event_loop()` select loop
+  and top-level wiring only
+- `tui/keys.rs` — all key handlers (`handle_key`, `handle_list_key`,
+  `handle_detail_key`, `handle_filter_key`, `update_list_scroll`). These
+  are pure functions on `&mut App` and need no async or cache access.
+- `tui/fetch.rs` — fetch dispatch (`check_needs_fetch`, `spawn_fetch`,
+  `fetch_launch_list/detail`), result handling (`handle_fetch_result`,
+  `maybe_load_detail_from_disk`, `dismiss_expired_errors`), and the
+  `FetchKind`/`FetchResult` types
+- `tui/render.rs` — render dispatch (`render`), overlays
+  (`render_size_warning`, `render_help_overlay`, `render_error`), and
+  `centered_rect` helper
+
+**Acceptance criteria:** `cargo test` passes with no regressions. No
+public API changes — the event loop entry point and types remain
+accessible from the same paths. Tests move to whichever module owns the
+code they exercise.
 
 ---
 

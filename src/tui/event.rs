@@ -39,6 +39,7 @@ use crate::models::{LaunchDetailCache, LaunchListCache, CACHE_VERSION};
 use crate::tui::app::{App, AppScreen, MIN_COLS, MIN_ROWS};
 use crate::tui::terminal::Tui;
 use crate::tui::views::detail;
+use crate::tui::views::filter;
 use crate::tui::views::list::{self, compute_scroll_offset};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 
@@ -253,10 +254,11 @@ fn spawn_fetch<C: Clock + Send + Sync + 'static>(
 ) -> Pin<Box<dyn Future<Output = FetchResult> + Send>> {
     match kind {
         FetchKind::LaunchList => {
-            let params = ListParams {
+            let mut params = ListParams {
                 limit: app.launches_per_page,
                 ..Default::default()
             };
+            app.filter_state.apply_to_params(&mut params, Utc::now());
             let c = Arc::clone(client);
             Box::pin(fetch_launch_list(c, params))
         }
@@ -447,6 +449,10 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('?') => {
             app.screen = AppScreen::Help(Box::new(app.screen.clone()));
         }
+        KeyCode::Char('f') => {
+            app.editing_filter = Some(app.filter_state.clone());
+            app.screen = AppScreen::FilterPanel;
+        }
         KeyCode::Char('r') => {
             if !app.loading {
                 app.refresh_requested = true;
@@ -524,11 +530,41 @@ fn handle_detail_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle keys in the filter panel (placeholder for Step 6.1).
+/// Handle keys in the filter panel.
 fn handle_filter_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
+            // Cancel: discard edits, return to list.
+            app.editing_filter = None;
             app.screen = AppScreen::List;
+        }
+        KeyCode::Enter => {
+            // Apply: promote editing filter to active, clear list to trigger re-fetch.
+            if let Some(edited) = app.editing_filter.take() {
+                app.filter_state = edited;
+                app.launches.clear();
+                app.selected_index = 0;
+                app.list_scroll_offset = 0;
+                app.total_count = 0;
+                app.cache_fetched_at = None;
+                app.cache_expires_at = None;
+            }
+            app.screen = AppScreen::List;
+        }
+        KeyCode::Tab => {
+            if let Some(ref mut f) = app.editing_filter {
+                f.next_category();
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some(ref mut f) = app.editing_filter {
+                f.cycle_prev();
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let Some(ref mut f) = app.editing_filter {
+                f.cycle_next();
+            }
         }
         KeyCode::Char('q') => app.should_quit = true,
         _ => {}
@@ -564,7 +600,12 @@ fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
                     }
                     render_help_overlay(frame, area);
                 }
-                AppScreen::FilterPanel => list::render_list(frame, area, app),
+                AppScreen::FilterPanel => {
+                    list::render_list(frame, area, app);
+                    if let Some(ref editing) = app.editing_filter {
+                        filter::render_filter_panel(frame, area, editing);
+                    }
+                }
             }
 
             // Render error state overlay if present.

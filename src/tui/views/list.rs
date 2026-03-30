@@ -53,11 +53,16 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 
 /// Build the title string: "Launches — Showing N of M" with optional rate limit.
 fn build_title(app: &App) -> String {
+    let filtered = if app.filter_state.has_active_filters() {
+        " [Filtered]"
+    } else {
+        ""
+    };
     let left = if app.loading {
         " Fetching launches... ".to_string()
     } else {
         format!(
-            " Launches — Showing {} of {} ",
+            " Launches{filtered} — Showing {} of {} ",
             app.launches.len(),
             app.total_count,
         )
