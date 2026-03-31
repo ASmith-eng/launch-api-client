@@ -26,7 +26,7 @@ pub fn build_status_line(app: &App) -> Line<'static> {
         return Line::from(Span::styled("  Refreshing...", dim));
     }
 
-    if app.is_offline {
+    if app.is_offline() {
         return build_offline_line(app);
     }
 
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn status_line_offline_with_cache() {
         let mut app = app_with_cache(120, -10); // stale cache
-        app.is_offline = true;
+        app.error_state = Some(crate::error::ErrorState::Offline);
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("(stale)"));
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn status_line_offline_no_cache() {
         let mut app = App::new((120, 40));
-        app.is_offline = true;
+        app.error_state = Some(crate::error::ErrorState::Offline);
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("No cached data"));
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn status_line_offline_overrides_stale() {
         let mut app = app_with_cache(120, -10);
-        app.is_offline = true;
+        app.error_state = Some(crate::error::ErrorState::Offline);
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("[OFFLINE]"));

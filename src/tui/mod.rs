@@ -2,7 +2,10 @@
 
 pub mod app;
 pub mod event;
+pub mod fetch;
 pub mod filter;
+pub mod keys;
+pub mod render;
 pub mod terminal;
 pub mod time_fmt;
 pub mod views;

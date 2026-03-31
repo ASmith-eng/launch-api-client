@@ -917,7 +917,7 @@ wired in). `cargo build` produces no warnings from these three sites.
 
 ---
 
-### Break 3.2 — Event loop modularisation
+### Break 3.2 — Event loop modularisation ✅
 
 `src/tui/event.rs` has grown to ~1 170 lines and handles four distinct
 concerns: the async event loop, fetch dispatch/result handling, key
@@ -940,6 +940,27 @@ handling, and render dispatch. Split it into focused modules:
 public API changes — the event loop entry point and types remain
 accessible from the same paths. Tests move to whichever module owns the
 code they exercise.
+
+**Status:** Complete. 339 tests passing (no regressions). Changes:
+
+- `src/tui/event.rs` — slimmed to ~100 lines: only `run_event_loop()`
+  with `tokio::select!` loop, importing from `fetch`, `keys`, `render`.
+- `src/tui/keys.rs` — new module: `handle_key()`, `handle_list_key()`,
+  `handle_detail_key()`, `handle_filter_key()`, `update_list_scroll()`.
+  Pure functions on `&mut App`, no async or external resource access.
+- `src/tui/fetch.rs` — new module: `FetchKind`, `FetchResult`,
+  `check_needs_fetch()`, `spawn_fetch()`, `fetch_launch_list()`,
+  `fetch_launch_detail()`, `handle_fetch_result()`,
+  `maybe_load_detail_from_disk()`, `dismiss_expired_errors()`,
+  `TRANSIENT_DISMISS_SECS`. All 28 fetch/dispatch tests moved here.
+- `src/tui/render.rs` — new module: `render()`, `render_size_warning()`,
+  `render_error()`, `centered_rect()`.
+- `src/tui/mod.rs` — declares `fetch`, `keys`, `render` modules.
+- Also collapsed `is_offline: bool` field on `App` into
+  `App::is_offline()` method derived from `error_state` (Break 3 finding
+  #2). Updated `status_bar.rs` and all tests accordingly.
+
+clippy clean (only pre-existing dead-code warnings from later-phase items).
 
 ---
 

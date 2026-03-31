@@ -49,8 +49,6 @@ pub struct App {
     pub loading: bool,
     /// Current error state shown to the user (if any).
     pub error_state: Option<ErrorState>,
-    /// Whether the app believes the network is unreachable.
-    pub is_offline: bool,
     /// Applied filter state (used for fetch dispatch).
     pub filter_state: FilterState,
     /// In-progress filter edits (populated only while FilterPanel is open).
@@ -89,7 +87,6 @@ impl App {
             detail_cache: HashMap::new(),
             loading: false,
             error_state: None,
-            is_offline: false,
             filter_state: FilterState::default(),
             editing_filter: None,
             terminal_size,
@@ -108,5 +105,12 @@ impl App {
     /// Whether the terminal is too small to render the full UI.
     pub fn is_terminal_too_small(&self) -> bool {
         self.terminal_size.0 < MIN_COLS || self.terminal_size.1 < MIN_ROWS
+    }
+
+    /// Whether the app believes the network is unreachable.
+    ///
+    /// Derived from `error_state` — there is no separate boolean flag.
+    pub fn is_offline(&self) -> bool {
+        matches!(self.error_state, Some(ErrorState::Offline))
     }
 }
