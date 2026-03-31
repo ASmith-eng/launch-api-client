@@ -2,6 +2,7 @@
 
 pub mod detail;
 pub mod filter;
+pub mod help;
 pub mod list;
 pub mod status_bar;
 

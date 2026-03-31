@@ -19,6 +19,9 @@ pub enum AppError {
     #[error("Cache deserialization failed: {0}")]
     CacheParse(#[from] serde_json::Error),
 
+    #[error("API response deserialization failed: {0}")]
+    ApiParse(serde_json::Error),
+
     #[error("I/O error: {0}")]
     Io(std::io::Error),
 

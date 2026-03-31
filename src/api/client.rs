@@ -7,7 +7,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::api::rate_limiter::RateLimiter;
 use crate::clock::Clock;
@@ -109,6 +109,7 @@ impl<C: Clock> Ll2Client<C> {
 
         let status = response.status();
         if status.is_success() {
+            debug!(url, status = status.as_u16(), "API response OK");
             return Ok(response);
         }
 
@@ -170,7 +171,20 @@ impl<C: Clock> Ll2Client<C> {
     async fn fetch_throttle_raw(&self) -> Result<ThrottleStatus, AppError> {
         let url = endpoints::api_throttle_url(&self.base_url);
         let response = self.send_and_check(&url).await?;
-        let ll2_throttle: Ll2ThrottleResponse = response.json().await?;
+        let body = response.text().await.map_err(AppError::Network)?;
+        let ll2_throttle: Ll2ThrottleResponse = match serde_json::from_str(&body) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                let preview = truncate_for_log(&body, 500);
+                warn!(
+                    error = %e,
+                    url,
+                    body_preview = preview,
+                    "failed to deserialize throttle response"
+                );
+                return Err(AppError::ApiParse(e));
+            }
+        };
         Ok(ll2_throttle.into())
     }
 
@@ -234,9 +248,25 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
 
         let url = endpoints::launches_upcoming_url(&self.base_url, params);
         let response = self.send_with_retry(&url).await?;
-        let paginated: PaginatedResponse<Ll2Launch> = response.json().await?;
+        let body = response.text().await.map_err(AppError::Network)?;
+        let paginated: PaginatedResponse<Ll2Launch> = match serde_json::from_str(&body) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                let preview = truncate_for_log(&body, 500);
+                warn!(
+                    error = %e,
+                    url,
+                    body_preview = preview,
+                    "failed to deserialize launch list response"
+                );
+                return Err(AppError::ApiParse(e));
+            }
+        };
 
-        let launches = paginated.results.into_iter().map(Into::into).collect();
+        let count = paginated.results.len();
+        let launches: Vec<LaunchSummary> =
+            paginated.results.into_iter().map(Into::into).collect();
+        info!(count, total = paginated.count, "fetched launch list");
         Ok(LaunchListResponse {
             launches,
             total_count: paginated.count,
@@ -248,9 +278,25 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
 
         let url = endpoints::launch_detail_url(&self.base_url, id);
         let response = self.send_with_retry(&url).await?;
-        let ll2_detail: Ll2LaunchDetail = response.json().await?;
+        let body = response.text().await.map_err(AppError::Network)?;
+        let ll2_detail: Ll2LaunchDetail = match serde_json::from_str(&body) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                let preview = truncate_for_log(&body, 500);
+                warn!(
+                    error = %e,
+                    url,
+                    launch_id = id,
+                    body_preview = preview,
+                    "failed to deserialize launch detail response"
+                );
+                return Err(AppError::ApiParse(e));
+            }
+        };
 
-        Ok(ll2_detail.into())
+        let detail: LaunchDetail = ll2_detail.into();
+        info!(launch_id = id, name = %detail.name, "fetched launch detail");
+        Ok(detail)
     }
 
     async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
@@ -266,6 +312,17 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         limiter.record_sync(status.remaining, status.limit);
 
         Ok(status)
+    }
+}
+
+/// Truncate a string for log output, appending "..." if it exceeds `max_len`.
+fn truncate_for_log(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut truncated = s[..max_len].to_string();
+        truncated.push_str("...");
+        truncated
     }
 }
 

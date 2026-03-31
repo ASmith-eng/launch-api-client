@@ -28,7 +28,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::api::client::{LaunchApi, LaunchListResponse, Ll2Client};
 use crate::cache::{self, CacheManager, CacheStrategy};
@@ -40,6 +40,7 @@ use crate::tui::app::{App, AppScreen, MIN_COLS, MIN_ROWS};
 use crate::tui::terminal::Tui;
 use crate::tui::views::detail;
 use crate::tui::views::filter;
+use crate::tui::views::help::{self, HelpContext};
 use crate::tui::views::list::{self, compute_scroll_offset};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 
@@ -79,6 +80,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
                 pending = Some(spawn_fetch(kind, &client, app));
             } else if app.refresh_requested {
                 // Request was set but conditions weren't met (fresh cache, rate limited).
+                debug!("refresh requested but skipped (cache fresh or rate limited)");
                 app.refresh_requested = false;
             }
         }
@@ -166,6 +168,7 @@ fn check_needs_fetch(app: &App) -> Option<FetchKind> {
         // List: auto-fetch only when there's no data at all (first run).
         AppScreen::List => {
             if app.launches.is_empty() {
+                debug!("auto-fetching list (no data loaded)");
                 Some(FetchKind::LaunchList)
             } else {
                 None
@@ -174,8 +177,15 @@ fn check_needs_fetch(app: &App) -> Option<FetchKind> {
         // Detail: auto-fetch when in-memory cache is missing or stale.
         AppScreen::Detail(id) => {
             let needs = match app.detail_cache.get(id) {
-                None => true,
-                Some(cached) => cached.is_stale(Utc::now()),
+                None => {
+                    debug!(launch_id = %id, "detail not in memory cache, will fetch");
+                    true
+                }
+                Some(cached) if cached.is_stale(Utc::now()) => {
+                    debug!(launch_id = %id, "detail cache is stale, will re-fetch");
+                    true
+                }
+                _ => false,
             };
             if needs {
                 Some(FetchKind::LaunchDetail(id.clone()))
@@ -235,9 +245,12 @@ fn maybe_load_detail_from_disk<C: Clock>(app: &mut App, cache_manager: &CacheMan
         if !app.detail_cache.contains_key(id) {
             match cache_manager.load_launch_detail(id) {
                 Ok(Some(cached)) => {
+                    debug!(launch_id = %id, "loaded detail from disk cache");
                     app.detail_cache.insert(id.clone(), cached);
                 }
-                Ok(None) => {} // Not on disk — will trigger a fetch.
+                Ok(None) => {
+                    debug!(launch_id = %id, "detail not in disk cache, will fetch");
+                }
                 Err(e) => {
                     warn!(error = %e, launch_id = %id, "failed to load detail from disk cache");
                 }
@@ -385,6 +398,9 @@ fn handle_fetch_result<C: Clock>(
                 // Generic UI message — the log has the full detail.
                 let ui_message = match &err {
                     AppError::Network(e) if e.is_decode() => {
+                        "Unexpected response from server".to_string()
+                    }
+                    AppError::ApiParse(_) => {
                         "Unexpected response from server".to_string()
                     }
                     AppError::ApiError { status, .. } => {
@@ -598,7 +614,8 @@ fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
                         }
                         _ => {}
                     }
-                    render_help_overlay(frame, area);
+                    let context = HelpContext::from_screen(prev);
+                    help::render_help_overlay(frame, area, context);
                 }
                 AppScreen::FilterPanel => {
                     list::render_list(frame, area, app);
@@ -643,30 +660,6 @@ fn render_size_warning(frame: &mut ratatui::Frame, area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
-/// Render a help overlay (placeholder for Step 6.2).
-fn render_help_overlay(frame: &mut ratatui::Frame, area: Rect) {
-    let text = Text::from(vec![
-        Line::raw(""),
-        Line::raw("  Keyboard Shortcuts"),
-        Line::raw("  ──────────────────"),
-        Line::raw("  ↑/k      Move up"),
-        Line::raw("  ↓/j      Move down"),
-        Line::raw("  Enter    View details"),
-        Line::raw("  Esc      Go back"),
-        Line::raw("  r        Refresh"),
-        Line::raw("  ?        Toggle help"),
-        Line::raw("  q        Quit"),
-        Line::raw(""),
-    ]);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .title(" Help ");
-
-    let popup = centered_rect(30, 13, area);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(Paragraph::new(text).block(block), popup);
-}
 
 /// Render an error state indicator.
 fn render_error(frame: &mut ratatui::Frame, area: Rect, error_state: &ErrorState) {

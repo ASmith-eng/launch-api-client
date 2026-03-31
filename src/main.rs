@@ -44,7 +44,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("warning: logging setup failed: {e}");
     }
 
-    info!("launch-client starting");
+    info!(
+        base_url = %config.api.base_url,
+        authenticated = !config.api.api_key.is_empty(),
+        log_level = %config.log.level,
+        launches_per_page = config.ui.launches_per_page,
+        "launch-client starting"
+    );
 
     let clock = SystemClock;
 

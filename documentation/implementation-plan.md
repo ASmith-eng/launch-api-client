@@ -790,7 +790,7 @@ Esc reverts. Results update in the list view.
 
 ---
 
-### Step 6.2 — Help overlay
+### Step 6.2 — Help overlay ✅
 
 Implement the context-aware help popup.
 
@@ -805,9 +805,49 @@ Implement the context-aware help popup.
 or `Esc` dismisses it. Underlying view is not interactive while help is
 shown.
 
+**Status:** Complete. 11 new tests (335 total).
+- `src/tui/views/help.rs` — `render_help_overlay()` centered popup with
+  `HelpContext` enum (List/Detail). `from_screen()` resolves context from
+  the wrapped `AppScreen`. List help shows Navigation (↑/↓, Enter,
+  Home/End), Actions (r, f), General (?, q), and config tip. Detail help
+  shows Navigation (↑/↓/j/k scroll, Esc back), Actions (r), General (?, q).
+  Both end with "Press ? or Esc to close" dismiss hint. Rounded Cyan border
+  matching filter panel style.
+- `src/tui/views/mod.rs` — Added `pub mod help`.
+- `src/tui/event.rs` — Replaced placeholder `render_help_overlay` with
+  context-aware dispatch: determines `HelpContext` from the wrapped screen,
+  delegates to `help::render_help_overlay()`.
+- Key handling already wired from prior steps: `?` in list/detail opens
+  `Help(Box<current>)`, `?`/`Esc` in Help restores wrapped screen, `q`
+  quits. Underlying view rendered but not interactive while help is shown.
+
 ---
 
-### Break 3.1 — Event loop modularisation
+### Break 3.1 — Dead code cleanup
+
+Investigate and resolve potentially dead code identified after Phase 6.
+These items produce compiler warnings and may be leftover from earlier
+refactors:
+
+- `clamp_scroll()` in `src/tui/views/detail.rs` — was earmarked for
+  Step 5.1 scroll clamping but may have been superseded by a different
+  approach. Remove if unused, or wire in if the intent was to keep it.
+- `AppError::Config` in `src/error.rs` — check whether config errors
+  are handled through a different path now. Remove if dead.
+- `CacheManager::now()` in `src/cache/mod.rs` — may be a leftover after
+  the generic `Clock` refactor. Remove if no longer needed.
+
+Leave warnings that correspond to code written for later phases (e.g.
+`fetch_throttle_status`, rate limiter methods, pagination fields,
+`DEV_BASE_URL`/`PROD_BASE_URL`, throttle response fields).
+
+**Acceptance criteria:** The three items above are resolved (removed or
+wired in). `cargo build` produces no warnings from these three sites.
+`cargo test` passes with no regressions.
+
+---
+
+### Break 3.2 — Event loop modularisation
 
 `src/tui/event.rs` has grown to ~1 170 lines and handles four distinct
 concerns: the async event loop, fetch dispatch/result handling, key
