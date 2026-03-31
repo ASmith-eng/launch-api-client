@@ -6,6 +6,111 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+/// Deserialize a field that may be either a plain string or an object with a
+/// `name` key (e.g. `"Commercial"` vs `{"id":3,"name":"Commercial"}`).
+/// Returns `Option<String>` — the name in both cases, or `None` if null/absent.
+mod string_or_named_object {
+    use serde::de::{self, Deserializer, MapAccess, Visitor};
+    use std::fmt;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StringOrObject;
+
+        impl<'de> Visitor<'de> for StringOrObject {
+            type Value = Option<String>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string, an object with a \"name\" field, or null")
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(Some(v.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(Some(v))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut name: Option<String> = None;
+                while let Some(key) = map.next_key::<&str>()? {
+                    if key == "name" {
+                        name = Some(map.next_value()?);
+                    } else {
+                        map.next_value::<de::IgnoredAny>()?;
+                    }
+                }
+                Ok(name)
+            }
+        }
+
+        deserializer.deserialize_any(StringOrObject)
+    }
+}
+
+/// Deserialize an image field that may be either a URL string or an object
+/// with an `image_url` key. Returns `Option<String>` — the URL in both cases.
+mod string_or_image_object {
+    use serde::de::{self, Deserializer, MapAccess, Visitor};
+    use std::fmt;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StringOrImage;
+
+        impl<'de> Visitor<'de> for StringOrImage {
+            type Value = Option<String>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a URL string, an object with an \"image_url\" field, or null")
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(None)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(Some(v.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(Some(v))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut image_url: Option<String> = None;
+                while let Some(key) = map.next_key::<&str>()? {
+                    if key == "image_url" {
+                        image_url = Some(map.next_value()?);
+                    } else {
+                        map.next_value::<de::IgnoredAny>()?;
+                    }
+                }
+                Ok(image_url)
+            }
+        }
+
+        deserializer.deserialize_any(StringOrImage)
+    }
+}
+
 /// Paginated response wrapper used by all LL2 list endpoints.
 #[derive(Debug, Deserialize)]
 pub struct PaginatedResponse<T> {
@@ -49,7 +154,7 @@ pub struct Ll2NetPrecision {
 #[derive(Debug, Deserialize)]
 pub struct Ll2Provider {
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
     pub provider_type: Option<String>,
 }
 
@@ -78,7 +183,7 @@ pub struct Ll2Country {
 #[derive(Debug, Deserialize)]
 pub struct Ll2Mission {
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
     pub mission_type: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -118,7 +223,7 @@ pub struct Ll2LaunchDetail {
     pub probability: Option<i32>,
     #[serde(default)]
     pub weather_concerns: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_image_object::deserialize")]
     pub image: Option<String>,
     pub launch_service_provider: Ll2ProviderDetail,
     #[serde(default)]
@@ -138,7 +243,7 @@ pub struct Ll2LaunchDetail {
 #[derive(Debug, Deserialize)]
 pub struct Ll2ProviderDetail {
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
     pub provider_type: Option<String>,
     #[serde(default)]
     pub total_launch_count: Option<u32>,
@@ -168,7 +273,7 @@ pub struct Ll2RocketConfiguration {
 #[derive(Debug, Deserialize)]
 pub struct Ll2MissionDetail {
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
     pub mission_type: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -509,5 +614,135 @@ mod tests {
         // Should not fail on unknown fields — serde defaults to ignoring them.
         let launch: Ll2Launch = serde_json::from_str(json).expect("should ignore unknown fields");
         assert_eq!(launch.name, "Test Launch");
+    }
+
+    // --- string_or_named_object resilience tests ---
+
+    #[test]
+    fn deserialize_provider_type_as_object() {
+        let json = r#"{
+            "id": "abc-123",
+            "name": "Test Launch",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": {
+                "name": "SpaceX",
+                "type": { "id": 3, "name": "Commercial" }
+            },
+            "pad": { "location": { "name": "KSC" } },
+            "mission": null
+        }"#;
+
+        let launch: Ll2Launch = serde_json::from_str(json).expect("should handle object type");
+        assert_eq!(
+            launch.launch_service_provider.provider_type.as_deref(),
+            Some("Commercial")
+        );
+    }
+
+    #[test]
+    fn deserialize_mission_type_as_object() {
+        let json = r#"{
+            "id": "abc-123",
+            "name": "Test Launch",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": { "name": "SpaceX" },
+            "pad": { "location": { "name": "KSC" } },
+            "mission": {
+                "name": "Test Mission",
+                "type": { "id": 5, "name": "Communications" },
+                "description": null,
+                "orbit": null
+            }
+        }"#;
+
+        let launch: Ll2Launch = serde_json::from_str(json).expect("should handle object type");
+        let mission = launch.mission.unwrap();
+        assert_eq!(mission.mission_type.as_deref(), Some("Communications"));
+    }
+
+    #[test]
+    fn deserialize_detail_with_object_types() {
+        let json = r#"{
+            "id": "abc-123",
+            "name": "Test Launch",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": {
+                "name": "SpaceX",
+                "type": { "id": 3, "name": "Commercial" },
+                "total_launch_count": 301,
+                "successful_launches": 295,
+                "failed_launches": 6
+            },
+            "pad": { "location": { "name": "KSC" } },
+            "image": {
+                "id": 42,
+                "name": "Starship Launch",
+                "image_url": "https://example.com/starship.jpg",
+                "thumbnail_url": "https://example.com/starship_thumb.jpg"
+            },
+            "mission": {
+                "name": "Test Mission",
+                "type": { "id": 5, "name": "Communications" },
+                "description": null,
+                "orbit": null,
+                "info_urls": [],
+                "vid_urls": []
+            }
+        }"#;
+
+        let detail: Ll2LaunchDetail =
+            serde_json::from_str(json).expect("should handle object types in detail");
+        assert_eq!(
+            detail.launch_service_provider.provider_type.as_deref(),
+            Some("Commercial")
+        );
+        assert_eq!(
+            detail.image.as_deref(),
+            Some("https://example.com/starship.jpg")
+        );
+        assert_eq!(
+            detail.mission.unwrap().mission_type.as_deref(),
+            Some("Communications")
+        );
+    }
+
+    #[test]
+    fn deserialize_image_as_string() {
+        let json = r#"{
+            "id": "abc-123",
+            "name": "Test",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": { "name": "Test" },
+            "pad": { "location": { "name": "KSC" } },
+            "image": "https://example.com/image.jpg"
+        }"#;
+
+        let detail: Ll2LaunchDetail =
+            serde_json::from_str(json).expect("should handle string image");
+        assert_eq!(
+            detail.image.as_deref(),
+            Some("https://example.com/image.jpg")
+        );
+    }
+
+    #[test]
+    fn deserialize_image_as_null() {
+        let json = r#"{
+            "id": "abc-123",
+            "name": "Test",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": { "name": "Test" },
+            "pad": { "location": { "name": "KSC" } },
+            "image": null
+        }"#;
+
+        let detail: Ll2LaunchDetail =
+            serde_json::from_str(json).expect("should handle null image");
+        assert!(detail.image.is_none());
     }
 }
