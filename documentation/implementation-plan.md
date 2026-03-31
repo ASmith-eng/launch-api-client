@@ -966,7 +966,7 @@ clippy clean (only pre-existing dead-code warnings from later-phase items).
 
 ## Phase 7: Visual Polish & Colour
 
-### Step 7.1 — Colour scheme and visual hierarchy
+### Step 7.1 — Colour scheme and visual hierarchy ✅
 
 Apply the full styling system across all views.
 
@@ -984,6 +984,34 @@ Apply the full styling system across all views.
 **Acceptance criteria:** Visual output matches the design doc styling
 tables. All status IDs render with correct colour/style. Unknown status
 IDs don't crash.
+
+**Status:** Complete. 358 tests passing (19 new). Changes:
+
+- `src/tui/style.rs` — new module: centralised 5-colour semantic palette
+  (GREEN, YELLOW, RED, CYAN, CHROME) and 3-tier text hierarchy functions
+  (`primary()`, `secondary()`, `label()`, `separator()`, `section_heading()`).
+  Also provides `probability_style()` (green/yellow/red/dim-gray by range),
+  `record_success()`/`record_failure()` (green/red), and
+  `link_label()`/`link_url()` (cyan/dim). 15 unit tests.
+- `src/tui/views/detail.rs` — probability percentage now coloured inline
+  (green ≥80%, yellow ≥50%, red <50%). Provider record bar now uses coloured
+  spans (green `█` success, red `░` failure). `build_record_bar_line()` returns
+  styled `Line` instead of plain `String`. `build_vehicle_provider_lines()` and
+  `build_location_lines()` return `Vec<Line>` for proper span propagation in
+  two-column layout. All text updated to use semantic hierarchy: NET time → Tier 1
+  (bold), mission name → Tier 1, description → Tier 2, field labels → Tier 3.
+  Helper `indent_line()` added for single-column layout. 8 new tests for
+  record bar colours and probability colouring.
+- `src/tui/views/list.rs` — NET time in name line → Tier 1 (bold white).
+  Provider/location line → Tier 2 (normal white) instead of Gray. Hint bar
+  keys → `secondary()`, descriptions → `label()`. Loading/empty states use
+  `label()`.
+- `src/tui/mod.rs` — declares `style` module.
+- Pre-existing items already correct: `status_map.rs` (8 status colours +
+  unknown fallback), `time_fmt.rs` (5-tier countdown styling), separators
+  (dim dark gray).
+
+clippy clean (only pre-existing dead-code warnings from later-phase items).
 
 ---
 

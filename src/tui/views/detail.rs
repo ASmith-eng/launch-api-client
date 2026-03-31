@@ -7,12 +7,13 @@
 
 use chrono::Utc;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::models::LaunchDetail;
 use crate::tui::app::App;
+use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
 use crate::tui::views::styled_block;
@@ -42,7 +43,7 @@ pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, ap
             } else {
                 "  No detail data available. Press Esc to go back."
             };
-            let p = Paragraph::new(msg).style(Style::default().fg(Color::DarkGray));
+            let p = Paragraph::new(msg).style(style::label());
             frame.render_widget(p, inner);
             return;
         }
@@ -103,7 +104,7 @@ fn build_content_lines(detail: &LaunchDetail, width: u16) -> Vec<Line<'static>> 
     let mut lines = Vec::with_capacity(64);
 
     // Hero header.
-    build_hero_section(&mut lines, detail);
+    build_hero_section(&mut lines, detail, width);
 
     // Separator.
     push_separator(&mut lines, width);
@@ -112,7 +113,7 @@ fn build_content_lines(detail: &LaunchDetail, width: u16) -> Vec<Line<'static>> 
     if width >= TWO_COL_MIN_WIDTH {
         build_two_column_section(&mut lines, detail, width);
     } else {
-        build_single_column_section(&mut lines, detail);
+        build_single_column_section(&mut lines, detail, width);
     }
 
     // Separator.
@@ -137,7 +138,9 @@ fn build_content_lines(detail: &LaunchDetail, width: u16) -> Vec<Line<'static>> 
 // Hero header
 // ---------------------------------------------------------------------------
 
-fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
+fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, width: u16) {
+    // Extra vertical padding before hero content.
+    lines.push(Line::raw(""));
     lines.push(Line::raw(""));
 
     // Status-colored ██ badges + countdown + status name.
@@ -149,7 +152,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
         None => (unknown_status_style(), detail.status.name.clone()),
     };
 
-    let mut hero_spans: Vec<Span<'static>> = vec![Span::styled("   ██  ", badge_style)];
+    let mut hero_spans: Vec<Span<'static>> = vec![Span::styled("██  ", badge_style)];
 
     if has_time {
         let countdown = time_fmt::format_countdown(now, detail.net);
@@ -159,14 +162,9 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
 
     hero_spans.push(Span::styled("  ██", badge_style));
     hero_spans.push(Span::raw("     "));
-    hero_spans.push(Span::styled(
-        status_name,
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    ));
+    hero_spans.push(Span::styled(status_name, style::primary()));
 
-    lines.push(Line::from(hero_spans));
+    lines.push(Line::from(hero_spans).centered());
 
     // NET time display (dual timezone).
     let time_str = time_fmt::format_net_time(
@@ -174,41 +172,62 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
         detail.net_precision.as_ref(),
         &detail.pad.location.timezone_name,
     );
-    lines.push(Line::from(vec![Span::styled(
-        format!("   {time_str}"),
-        Style::default().fg(Color::White),
-    )]));
+    lines.push(Line::from(Span::styled(time_str, style::primary())).centered());
 
     // Window + probability line (if any data present).
-    let mut window_parts: Vec<String> = Vec::new();
+    let has_window = detail.window_start.is_some() && detail.window_end.is_some();
+    let has_probability = detail.probability.is_some_and(|p| p >= 0);
 
-    if let (Some(start), Some(end)) = (&detail.window_start, &detail.window_end) {
-        let start_str = start.format("%H:%M").to_string();
-        let end_str = end.format("%H:%M").to_string();
-        window_parts.push(format!("Window: {start_str} - {end_str} UTC"));
-    }
+    if has_window || has_probability {
+        let mut spans: Vec<Span<'static>> = Vec::new();
 
-    if let Some(prob) = detail.probability {
-        if prob >= 0 {
-            window_parts.push(format!("Probability: {prob}%"));
+        if let (Some(start), Some(end)) = (&detail.window_start, &detail.window_end) {
+            let start_str = start.format("%H:%M").to_string();
+            let end_str = end.format("%H:%M").to_string();
+            spans.push(Span::styled(
+                format!("Window: {start_str} - {end_str} UTC"),
+                style::label(),
+            ));
         }
+
+        if has_window && has_probability {
+            spans.push(Span::styled("  ·  ", style::label()));
+        }
+
+        if let Some(prob) = detail.probability {
+            if prob >= 0 {
+                spans.push(Span::styled("Probability: ", style::label()));
+                spans.push(Span::styled(
+                    format!("{prob}%"),
+                    style::probability_style(Some(prob)),
+                ));
+            }
+        }
+
+        lines.push(Line::from(spans).centered());
     }
 
-    if !window_parts.is_empty() {
-        let joined = window_parts.join("  ·  ");
-        lines.push(Line::from(Span::styled(
-            format!("   {joined}"),
-            Style::default().fg(Color::Gray),
-        )));
-    }
-
-    // Weather concerns.
+    // Weather concerns — wrap to fit within the view width.
     if let Some(weather) = &detail.weather_concerns {
         if !weather.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("   Weather: {weather}"),
-                Style::default().fg(Color::Gray),
-            )));
+            let prefix = "Weather: ";
+            let wrap_width = (width as usize).saturating_sub(prefix.len() + 4);
+            let wrapped = word_wrap(weather, wrap_width);
+            for (i, line) in wrapped.into_iter().enumerate() {
+                if i == 0 {
+                    lines.push(
+                        Line::from(vec![
+                            Span::styled(prefix, style::label()),
+                            Span::styled(line, style::secondary()),
+                        ])
+                        .centered(),
+                    );
+                } else {
+                    lines.push(
+                        Line::from(Span::styled(line, style::secondary())).centered(),
+                    );
+                }
+            }
         }
     }
 
@@ -224,12 +243,13 @@ fn build_two_column_section(
     detail: &LaunchDetail,
     width: u16,
 ) {
-    let half = (width as usize).saturating_sub(4) / 2; // 2-char indent each side + divider
+    let half = (width as usize).saturating_sub(7) / 2; // 3-char indent + 3-char divider + margin
 
-    let left_lines = build_vehicle_provider_lines(detail);
-    let right_lines = build_location_lines(detail);
+    let vehicle_lines = build_vehicle_lines(detail, half);
+    let location_lines = build_location_lines(detail, half);
 
-    let max_rows = left_lines.len().max(right_lines.len());
+    // Two-column grid: vehicle (left) │ location (right).
+    let grid_rows = vehicle_lines.len().max(location_lines.len());
 
     lines.push(Line::raw(""));
 
@@ -237,35 +257,36 @@ fn build_two_column_section(
     let left_header = format!("   {:<width$}", "VEHICLE", width = half);
     let right_header = "LOCATION".to_string();
     lines.push(Line::from(vec![
-        Span::styled(
-            left_header,
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("│  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            right_header,
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(left_header, style::section_heading()),
+        Span::styled("│  ", style::label()),
+        Span::styled(right_header, style::section_heading()),
     ]));
 
-    for i in 0..max_rows {
-        let left_content = left_lines.get(i).cloned().unwrap_or_default();
-        let right_content = right_lines.get(i).cloned().unwrap_or_default();
+    for i in 0..grid_rows {
+        let left_line = vehicle_lines.get(i).cloned().unwrap_or_default();
+        let right_line = location_lines.get(i).cloned().unwrap_or_default();
 
-        // Pad left column to fixed width.
-        let left_display_len = left_content.chars().count();
-        let padding = half.saturating_sub(left_display_len);
-        let padded_left = format!("   {left_content}{:padding$}", "", padding = padding);
+        let left_text_len: usize = left_line.spans.iter().map(|s| s.content.len()).sum();
+        let padding = half.saturating_sub(left_text_len);
 
-        lines.push(Line::from(vec![
-            Span::styled(padded_left, Style::default().fg(Color::Gray)),
-            Span::styled("│  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(right_content, Style::default().fg(Color::Gray)),
-        ]));
+        let mut spans = Vec::with_capacity(left_line.spans.len() + right_line.spans.len() + 3);
+        spans.push(Span::raw("   "));
+        spans.extend(left_line.spans);
+        spans.push(Span::raw(" ".repeat(padding)));
+        spans.push(Span::styled("│  ", style::label()));
+        spans.extend(right_line.spans);
+
+        lines.push(Line::from(spans));
+    }
+
+    // Provider section — full-width below the grid, no divider.
+    let provider_width = (width as usize).saturating_sub(6);
+    let provider_lines = build_provider_lines(detail, provider_width);
+    if !provider_lines.is_empty() {
+        lines.push(Line::raw(""));
+        for line in provider_lines {
+            lines.push(indent_line(line));
+        }
     }
 
     lines.push(Line::raw(""));
@@ -275,51 +296,73 @@ fn build_two_column_section(
 // Single-column fallback (< 100 cols)
 // ---------------------------------------------------------------------------
 
-fn build_single_column_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
+fn build_single_column_section(
+    lines: &mut Vec<Line<'static>>,
+    detail: &LaunchDetail,
+    width: u16,
+) {
+    let col_width = (width as usize).saturating_sub(6); // 3-char indent + margin
+
     lines.push(Line::raw(""));
 
     // Vehicle section.
     lines.push(section_header("VEHICLE"));
-    for line in build_vehicle_provider_lines(detail) {
-        lines.push(Line::from(Span::styled(
-            format!("   {line}"),
-            Style::default().fg(Color::Gray),
-        )));
+    for line in build_vehicle_lines(detail, col_width) {
+        lines.push(indent_line(line));
+    }
+
+    // Provider section.
+    let provider_lines = build_provider_lines(detail, col_width);
+    if !provider_lines.is_empty() {
+        lines.push(Line::raw(""));
+        for line in provider_lines {
+            lines.push(indent_line(line));
+        }
     }
 
     lines.push(Line::raw(""));
 
     // Location section.
     lines.push(section_header("LOCATION"));
-    for line in build_location_lines(detail) {
-        lines.push(Line::from(Span::styled(
-            format!("   {line}"),
-            Style::default().fg(Color::Gray),
-        )));
+    for line in build_location_lines(detail, col_width) {
+        lines.push(indent_line(line));
     }
 
     lines.push(Line::raw(""));
 }
 
 // ---------------------------------------------------------------------------
-// Vehicle / Provider content
+// Vehicle content (rocket name only — used in the two-column grid)
 // ---------------------------------------------------------------------------
 
-fn build_vehicle_provider_lines(detail: &LaunchDetail) -> Vec<String> {
-    let mut out = Vec::new();
+fn build_vehicle_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
 
     if let Some(rocket) = &detail.rocket_full_name {
-        out.push(rocket.clone());
+        for wrapped in word_wrap(rocket, max_width) {
+            out.push(Line::from(Span::styled(wrapped, style::secondary())));
+        }
     }
 
-    out.push(String::new()); // blank spacer
+    out
+}
 
-    // Provider sub-header + type.
-    let provider_line = match &detail.launch_service_provider.provider_type {
+// ---------------------------------------------------------------------------
+// Provider content (name, record bar — rendered full-width below the grid)
+// ---------------------------------------------------------------------------
+
+fn build_provider_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+
+    // Provider heading + name underneath.
+    out.push(Line::from(Span::styled("PROVIDER", style::section_heading())));
+    let provider_text = match &detail.launch_service_provider.provider_type {
         Some(pt) => format!("{} ({})", detail.launch_service_provider.name, pt),
         None => detail.launch_service_provider.name.clone(),
     };
-    out.push(format!("PROVIDER: {provider_line}"));
+    for wrapped in word_wrap(&provider_text, max_width) {
+        out.push(Line::from(Span::styled(wrapped, style::secondary())));
+    }
 
     // Provider record bar.
     if let (Some(total), Some(success), Some(failed)) = (
@@ -328,21 +371,26 @@ fn build_vehicle_provider_lines(detail: &LaunchDetail) -> Vec<String> {
         detail.provider_failed_launches,
     ) {
         if total > 0 {
-            let bar = build_record_bar(success, total);
-            out.push(bar);
-            out.push(format!(
-                "{total} launches ({success} ok, {failed} fail)"
-            ));
+            out.push(build_record_bar_line(success, total));
+            out.push(Line::from(Span::styled(
+                format!("{total} launches ({success} ok, {failed} fail)"),
+                style::label(),
+            )));
         }
     }
 
     out
 }
 
-/// Build a `█`/`░` success/failure bar scaled to `RECORD_BAR_WIDTH`.
-pub fn build_record_bar(success: u32, total: u32) -> String {
+/// Build a coloured `█`/`░` record bar as a [`Line`].
+///
+/// Success blocks are green, failure blocks are red, percentage is Tier 3.
+pub fn build_record_bar_line(success: u32, total: u32) -> Line<'static> {
     if total == 0 {
-        return "░".repeat(RECORD_BAR_WIDTH);
+        return Line::from(Span::styled(
+            "░".repeat(RECORD_BAR_WIDTH),
+            style::record_failure(),
+        ));
     }
 
     let success_ratio = success as f64 / total as f64;
@@ -350,22 +398,25 @@ pub fn build_record_bar(success: u32, total: u32) -> String {
     let fail_blocks = RECORD_BAR_WIDTH.saturating_sub(success_blocks);
     let pct = (success_ratio * 100.0).round() as u32;
 
-    format!(
-        "{}{} {pct}%",
-        "█".repeat(success_blocks),
-        "░".repeat(fail_blocks),
-    )
+    Line::from(vec![
+        Span::styled("█".repeat(success_blocks), style::record_success()),
+        Span::styled("░".repeat(fail_blocks), style::record_failure()),
+        Span::styled(format!(" {pct}%"), style::label()),
+    ])
 }
+
 
 // ---------------------------------------------------------------------------
 // Location content
 // ---------------------------------------------------------------------------
 
-fn build_location_lines(detail: &LaunchDetail) -> Vec<String> {
+fn build_location_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
     let mut out = Vec::new();
 
     if let Some(pad_name) = &detail.pad.name {
-        out.push(pad_name.clone());
+        for wrapped in word_wrap(pad_name, max_width) {
+            out.push(Line::from(Span::styled(wrapped, style::secondary())));
+        }
     }
 
     let location = &detail.pad.location;
@@ -373,7 +424,9 @@ fn build_location_lines(detail: &LaunchDetail) -> Vec<String> {
         Some(country) => format!("{}, {}", location.name, country.name),
         None => location.name.clone(),
     };
-    out.push(loc_str);
+    for wrapped in word_wrap(&loc_str, max_width) {
+        out.push(Line::from(Span::styled(wrapped, style::secondary())));
+    }
 
     out
 }
@@ -388,28 +441,31 @@ fn build_mission_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) 
 
     match &detail.mission {
         Some(mission) => {
-            // Mission name + type.
+            // Mission name + type (Tier 1 — primary scanned value).
             lines.push(Line::from(Span::styled(
                 format!("   {} ({})", mission.name, mission.mission_type),
-                Style::default().fg(Color::White),
+                style::primary(),
             )));
 
-            // Orbit.
+            // Orbit (label is Tier 3, value is Tier 2).
             if let Some(orbit) = &mission.orbit {
-                lines.push(Line::from(Span::styled(
-                    format!("   Orbit: {} ({})", orbit.name, orbit.abbrev),
-                    Style::default().fg(Color::Gray),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled("   Orbit: ", style::label()),
+                    Span::styled(
+                        format!("{} ({})", orbit.name, orbit.abbrev),
+                        style::secondary(),
+                    ),
+                ]));
             }
 
-            // Description (word-wrapped would be ideal, but for now just display).
+            // Description (Tier 2 — supporting context).
             if let Some(desc) = &mission.description {
                 if !desc.is_empty() {
                     lines.push(Line::raw(""));
                     for wrapped_line in word_wrap(desc, 72) {
                         lines.push(Line::from(Span::styled(
                             format!("   {wrapped_line}"),
-                            Style::default().fg(Color::Gray),
+                            style::secondary(),
                         )));
                     }
                 }
@@ -418,7 +474,7 @@ fn build_mission_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) 
         None => {
             lines.push(Line::from(Span::styled(
                 "   No mission information available.",
-                Style::default().fg(Color::DarkGray),
+                style::label(),
             )));
         }
     }
@@ -443,38 +499,33 @@ fn build_links_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
     lines.push(Line::raw(""));
     lines.push(section_header("LINKS"));
 
-    let cyan = Style::default().fg(Color::Cyan);
-    let dim_underline = Style::default()
-        .fg(Color::DarkGray)
-        .add_modifier(Modifier::DIM);
-
     for vid in &detail.vid_urls {
         let label = vid.title.as_deref().unwrap_or("Webcast");
         lines.push(Line::from(vec![
-            Span::styled(format!("   {label:<10}"), cyan),
-            Span::styled(vid.url.clone(), dim_underline),
+            Span::styled(format!("   {label:<10}"), style::link_label()),
+            Span::styled(vid.url.clone(), style::link_url()),
         ]));
     }
 
     for info in &detail.info_urls {
         let label = info.title.as_deref().unwrap_or("Info");
         lines.push(Line::from(vec![
-            Span::styled(format!("   {label:<10}"), cyan),
-            Span::styled(info.url.clone(), dim_underline),
+            Span::styled(format!("   {label:<10}"), style::link_label()),
+            Span::styled(info.url.clone(), style::link_url()),
         ]));
     }
 
     for program in &detail.programs {
         lines.push(Line::from(vec![
-            Span::styled("   Program   ", cyan),
-            Span::styled(program.clone(), Style::default().fg(Color::Gray)),
+            Span::styled("   Program   ", style::link_label()),
+            Span::styled(program.clone(), style::secondary()),
         ]));
     }
 
     if let Some(image) = &detail.image_url {
         lines.push(Line::from(vec![
-            Span::styled("   Image     ", cyan),
-            Span::styled(image.clone(), dim_underline),
+            Span::styled("   Image     ", style::link_label()),
+            Span::styled(image.clone(), style::link_url()),
         ]));
     }
 
@@ -491,9 +542,7 @@ fn push_separator(lines: &mut Vec<Line<'static>>, width: u16) {
     let sep = "━".repeat(sep_width);
     lines.push(Line::from(Span::styled(
         format!("  {sep}"),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
+        style::separator(),
     )));
 }
 
@@ -501,10 +550,16 @@ fn push_separator(lines: &mut Vec<Line<'static>>, width: u16) {
 fn section_header(label: &str) -> Line<'static> {
     Line::from(Span::styled(
         format!("   {label}"),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
+        style::section_heading(),
     ))
+}
+
+/// Prepend a 3-space indent to a line, preserving its spans.
+fn indent_line(line: Line<'static>) -> Line<'static> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 1);
+    spans.push(Span::raw("   "));
+    spans.extend(line.spans);
+    Line::from(spans)
 }
 
 /// Simple word-wrap to a target line width.
@@ -578,17 +633,20 @@ fn render_scroll_indicator(
 fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let status_line = status_bar::build_status_line(app);
 
+    let key = style::secondary();
+    let desc = style::label();
+
     let hints = Line::from(vec![
-        Span::styled("  Esc", Style::default().fg(Color::White)),
-        Span::styled(": Back · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("↑/↓", Style::default().fg(Color::White)),
-        Span::styled(": Scroll · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("r", Style::default().fg(Color::White)),
-        Span::styled(": Refresh · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("?", Style::default().fg(Color::White)),
-        Span::styled(": Help · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("q", Style::default().fg(Color::White)),
-        Span::styled(": Quit", Style::default().fg(Color::DarkGray)),
+        Span::styled("  Esc", key),
+        Span::styled(": Back · ", desc),
+        Span::styled("↑/↓", key),
+        Span::styled(": Scroll · ", desc),
+        Span::styled("r", key),
+        Span::styled(": Refresh · ", desc),
+        Span::styled("?", key),
+        Span::styled(": Help · ", desc),
+        Span::styled("q", key),
+        Span::styled(": Quit", desc),
     ]);
 
     let paragraph = Paragraph::new(vec![status_line, hints]);
@@ -656,42 +714,106 @@ mod tests {
 
     // ── Provider record bar ────────────────────────────────────────────
 
+    /// Extract concatenated text from a Line's spans.
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     #[test]
     fn record_bar_perfect_record() {
-        let bar = build_record_bar(100, 100);
-        assert!(bar.starts_with("████████████████████"));
-        assert!(bar.contains("100%"));
+        let bar = build_record_bar_line(100, 100);
+        let text = line_text(&bar);
+        assert!(text.contains("████████████████████"));
+        assert!(text.contains("100%"));
     }
 
     #[test]
     fn record_bar_zero_success() {
-        let bar = build_record_bar(0, 10);
-        assert!(bar.starts_with("░░░░░░░░░░░░░░░░░░░░"));
-        assert!(bar.contains("0%"));
+        let bar = build_record_bar_line(0, 10);
+        let text = line_text(&bar);
+        assert!(text.contains("░░░░░░░░░░░░░░░░░░░░"));
+        assert!(text.contains("0%"));
     }
 
     #[test]
     fn record_bar_mixed() {
-        let bar = build_record_bar(295, 301);
-        // 295/301 ≈ 98%, so ~20 success blocks.
-        assert!(bar.contains("98%") || bar.contains("97%") || bar.contains("99%"));
-        assert!(bar.contains('█'));
+        let bar = build_record_bar_line(295, 301);
+        let text = line_text(&bar);
+        assert!(text.contains("98%") || text.contains("97%") || text.contains("99%"));
+        assert!(text.contains('█'));
     }
 
     #[test]
     fn record_bar_zero_total() {
-        let bar = build_record_bar(0, 0);
-        assert_eq!(bar, "░░░░░░░░░░░░░░░░░░░░");
+        let bar = build_record_bar_line(0, 0);
+        let text = line_text(&bar);
+        assert!(text.contains("░░░░░░░░░░░░░░░░░░░░"));
     }
 
     #[test]
     fn record_bar_fifty_percent() {
-        let bar = build_record_bar(50, 100);
-        assert!(bar.contains("50%"));
-        let success_count = bar.matches('█').count();
-        let fail_count = bar.matches('░').count();
+        let bar = build_record_bar_line(50, 100);
+        let text = line_text(&bar);
+        assert!(text.contains("50%"));
+        let success_count = text.matches('█').count();
+        let fail_count = text.matches('░').count();
         assert_eq!(success_count, 10);
         assert_eq!(fail_count, 10);
+    }
+
+    #[test]
+    fn record_bar_success_is_green() {
+        let bar = build_record_bar_line(10, 10);
+        // First span should be the success blocks, coloured green.
+        let first = &bar.spans[0];
+        assert!(first.content.contains('█'));
+        assert_eq!(first.style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn record_bar_failure_is_red() {
+        let bar = build_record_bar_line(0, 10);
+        // With 0 success, the failure span should be first styled span with ░.
+        let fail_span = bar.spans.iter().find(|s| s.content.contains('░')).unwrap();
+        assert_eq!(fail_span.style.fg, Some(Color::Red));
+    }
+
+    // ── Probability colouring ─────────────────────────────────────────
+
+    #[test]
+    fn probability_high_renders_green() {
+        let mut detail = rich_detail();
+        detail.probability = Some(90);
+        let lines = build_content_lines(&detail, 120);
+        let prob_line = lines.iter().find(|l| {
+            l.spans.iter().any(|s| s.content.contains("90%"))
+        }).expect("should contain probability");
+        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("90%")).unwrap();
+        assert_eq!(pct_span.style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn probability_medium_renders_yellow() {
+        let mut detail = rich_detail();
+        detail.probability = Some(60);
+        let lines = build_content_lines(&detail, 120);
+        let prob_line = lines.iter().find(|l| {
+            l.spans.iter().any(|s| s.content.contains("60%"))
+        }).expect("should contain probability");
+        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("60%")).unwrap();
+        assert_eq!(pct_span.style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn probability_low_renders_red() {
+        let mut detail = rich_detail();
+        detail.probability = Some(30);
+        let lines = build_content_lines(&detail, 120);
+        let prob_line = lines.iter().find(|l| {
+            l.spans.iter().any(|s| s.content.contains("30%"))
+        }).expect("should contain probability");
+        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("30%")).unwrap();
+        assert_eq!(pct_span.style.fg, Some(Color::Red));
     }
 
     // ── Word wrap ──────────────────────────────────────────────────────

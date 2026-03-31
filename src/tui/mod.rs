@@ -6,6 +6,7 @@ pub mod fetch;
 pub mod filter;
 pub mod keys;
 pub mod render;
+pub mod style;
 pub mod terminal;
 pub mod time_fmt;
 pub mod views;

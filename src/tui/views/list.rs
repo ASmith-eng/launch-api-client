@@ -5,12 +5,13 @@
 //! blank separator line.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::models::LaunchSummary;
 use crate::tui::app::App;
+use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
 use crate::tui::views::styled_block;
@@ -28,15 +29,13 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     frame.render_widget(block, area);
 
     if app.loading && app.launches.is_empty() {
-        let loading =
-            Paragraph::new("  Fetching launches...").style(Style::default().fg(Color::DarkGray));
+        let loading = Paragraph::new("  Fetching launches...").style(style::label());
         frame.render_widget(loading, inner);
         return;
     }
 
     if app.launches.is_empty() {
-        let empty =
-            Paragraph::new("  No launches to display.").style(Style::default().fg(Color::DarkGray));
+        let empty = Paragraph::new("  No launches to display.").style(style::label());
         frame.render_widget(empty, inner);
         return;
     }
@@ -148,18 +147,16 @@ fn build_name_line(launch: &LaunchSummary, selected: bool, width: u16) -> Line<'
     let padding = " ".repeat(pad_len);
 
     let name_style = if selected {
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
+        style::primary()
     } else {
-        Style::default().fg(Color::White)
+        style::secondary()
     };
 
     Line::from(vec![
         Span::styled(marker.to_string(), name_style),
         Span::styled(truncated_name, name_style),
         Span::raw(padding),
-        Span::styled(time_str, Style::default().fg(Color::White)),
+        Span::styled(time_str, style::primary()),
         Span::raw(" "),
         Span::styled(badge_text, badge_style),
     ])
@@ -170,13 +167,11 @@ fn build_provider_line(launch: &LaunchSummary, _selected: bool) -> Line<'static>
     let provider = launch.launch_service_provider.name.clone();
     let location = launch.pad.location.name.clone();
 
-    let style = Style::default().fg(Color::Gray);
-
     Line::from(vec![
-        Span::styled("    ", style),
-        Span::styled(provider, style),
-        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled(location, style),
+        Span::styled("    ", style::secondary()),
+        Span::styled(provider, style::secondary()),
+        Span::styled(" | ", style::label()),
+        Span::styled(location, style::secondary()),
     ])
 }
 
@@ -205,19 +200,22 @@ fn truncate_str(s: &str, max_width: usize) -> String {
 fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let status_line = status_bar::build_status_line(app);
 
+    let key = style::secondary();
+    let desc = style::label();
+
     let hints = Line::from(vec![
-        Span::styled("  ↑/↓", Style::default().fg(Color::White)),
-        Span::styled(": Navigate · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Enter", Style::default().fg(Color::White)),
-        Span::styled(": Details · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("f", Style::default().fg(Color::White)),
-        Span::styled(": Filters · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("r", Style::default().fg(Color::White)),
-        Span::styled(": Refresh · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("?", Style::default().fg(Color::White)),
-        Span::styled(": Help · ", Style::default().fg(Color::DarkGray)),
-        Span::styled("q", Style::default().fg(Color::White)),
-        Span::styled(": Quit", Style::default().fg(Color::DarkGray)),
+        Span::styled("  ↑/↓", key),
+        Span::styled(": Navigate · ", desc),
+        Span::styled("Enter", key),
+        Span::styled(": Details · ", desc),
+        Span::styled("f", key),
+        Span::styled(": Filters · ", desc),
+        Span::styled("r", key),
+        Span::styled(": Refresh · ", desc),
+        Span::styled("?", key),
+        Span::styled(": Help · ", desc),
+        Span::styled("q", key),
+        Span::styled(": Quit", desc),
     ]);
 
     let paragraph = Paragraph::new(vec![status_line, hints]);
