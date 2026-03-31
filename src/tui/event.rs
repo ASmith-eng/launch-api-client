@@ -540,6 +540,9 @@ fn handle_detail_key(app: &mut App, key: KeyEvent) {
             app.detail_scroll_offset = app.detail_scroll_offset.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
+            // Upper bound is enforced at render time in render_detail() via
+            // `app.detail_scroll_offset.min(max_scroll)`, so over-incrementing
+            // here is visually harmless.
             app.detail_scroll_offset += 1;
         }
         _ => {}

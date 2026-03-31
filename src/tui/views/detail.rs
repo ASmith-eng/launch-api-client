@@ -73,16 +73,6 @@ pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, ap
     render_hint_bar(frame, hint_area, app);
 }
 
-/// Clamp the detail scroll offset to the maximum scrollable range.
-///
-/// Call this after rendering to update `app.detail_scroll_offset` so it
-/// stays within bounds. Returns the clamped value.
-pub fn clamp_scroll(app: &mut App, content_height: usize, viewport_height: usize) -> usize {
-    let max_scroll = content_height.saturating_sub(viewport_height);
-    app.detail_scroll_offset = app.detail_scroll_offset.min(max_scroll);
-    app.detail_scroll_offset
-}
-
 // ---------------------------------------------------------------------------
 // Title
 // ---------------------------------------------------------------------------
@@ -616,7 +606,6 @@ mod tests {
     use crate::models::{
         LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Provider, UrlEntry,
     };
-    use crate::tui::app::App;
 
     /// Build a richly populated detail for testing.
     fn rich_detail() -> LaunchDetail {
@@ -865,35 +854,6 @@ mod tests {
             .iter()
             .any(|l| l.spans.iter().any(|s| s.content.contains('│')));
         assert!(has_divider, "wide layout should have column divider");
-    }
-
-    // ── Scroll clamping ────────────────────────────────────────────────
-
-    #[test]
-    fn clamp_scroll_within_bounds() {
-        let mut app = App::new((120, 40));
-        app.detail_scroll_offset = 5;
-        let result = clamp_scroll(&mut app, 100, 40);
-        assert_eq!(result, 5);
-    }
-
-    #[test]
-    fn clamp_scroll_exceeds_max() {
-        let mut app = App::new((120, 40));
-        app.detail_scroll_offset = 999;
-        let result = clamp_scroll(&mut app, 50, 40);
-        // max_scroll = 50 - 40 = 10
-        assert_eq!(result, 10);
-        assert_eq!(app.detail_scroll_offset, 10);
-    }
-
-    #[test]
-    fn clamp_scroll_content_fits_viewport() {
-        let mut app = App::new((120, 40));
-        app.detail_scroll_offset = 5;
-        let result = clamp_scroll(&mut app, 30, 40);
-        // content < viewport → max_scroll = 0
-        assert_eq!(result, 0);
     }
 
     // ── Missing optional fields ────────────────────────────────────────

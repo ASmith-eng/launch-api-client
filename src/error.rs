@@ -25,8 +25,6 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(std::io::Error),
 
-    #[error("Configuration error: {0}")]
-    Config(String),
 }
 
 impl AppError {
@@ -131,12 +129,6 @@ mod tests {
     }
 
     #[test]
-    fn config_error_is_not_retryable() {
-        let err = AppError::Config("bad config".into());
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
     fn network_error_display() {
         // We can't easily construct a reqwest::Error, but we can verify the
         // non-network variants display correctly.
@@ -180,12 +172,6 @@ mod tests {
             std::io::ErrorKind::NotFound,
             "file not found",
         ));
-        assert!(!err.is_offline_signal());
-    }
-
-    #[test]
-    fn config_error_is_not_offline_signal() {
-        let err = AppError::Config("bad config".into());
         assert!(!err.is_offline_signal());
     }
 

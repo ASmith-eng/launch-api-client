@@ -138,11 +138,6 @@ impl<C: Clock> CacheManager<C> {
         Self { cache_dir, clock }
     }
 
-    /// Return the current time from the injected clock.
-    pub fn now(&self) -> DateTime<Utc> {
-        self.clock.now()
-    }
-
     // -- App state --------------------------------------------------------
 
     pub fn load_app_state(&self) -> Result<Option<AppState>, AppError> {

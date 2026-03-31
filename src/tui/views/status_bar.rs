@@ -108,7 +108,6 @@ fn staleness_text(
 mod tests {
     use super::*;
     use chrono::Duration;
-    use crate::config::UiConfig;
     use crate::tui::app::App;
 
     fn app_with_cache(fetched_ago_mins: i64, expires_in_mins: i64) -> App {

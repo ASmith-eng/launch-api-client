@@ -823,7 +823,66 @@ shown.
 
 ---
 
-### Break 3.1 — Dead code cleanup
+## Break 3: Reflection ✅
+
+Use plan mode or any brainstorming and code review skills to reflect on the design decisions and implementation for phases 5 and 6.
+
+**Discuss:**
+- Are there still any open questions or design gaps for the steps we have implemented so far? Think about the design logic - are there any decisions we've made that don't make sense (overcomplicated, or too many assumptions)?
+- Is error handling adequate and does it use best practices for production code?
+- Looking ahead to the next phases, can you forsee any issues with how the new logic we will implement will interface with the logic we have already completed?
+- Anything else you need to be explained, or want to discuss?
+
+**Status:** Complete. Full codebase review of Phases 5–6 conducted. Findings:
+
+**Design decisions — all sound:**
+- Fetch dispatch (`check_needs_fetch` + `FetchKind` enum) is deterministic and
+  easy to reason about. Three clear paths: manual refresh, auto-fetch on empty
+  list, auto-fetch on stale detail.
+- Filter implementation is excellent. `FilterOption` trait eliminates boilerplate;
+  `apply_to_params()` cleanly maps UI filters to API query parameters.
+- Help overlay is complete and context-aware (list vs detail keybindings).
+- Status bar handles all 4 states (refreshing, offline, stale, fresh) with
+  config-aware time formatting.
+- `tokio::select!` with biased and `pending.is_some()` guard safely protects the
+  `unwrap()` on the fetch future — single-threaded, guard evaluated atomically.
+- `countdown_style()` in `time_fmt.rs` already implements colour tiers — Phase 7
+  should audit against design doc thresholds rather than re-implementing.
+
+**Dead code confirmed (address in Break 3.1):**
+1. `clamp_scroll()` in `detail.rs:80` — never called; scroll clamping is done
+   inline in `render_detail()` at lines 61–62. Tests exist but zero call-sites.
+2. `AppError::Config` in `error.rs:28` — never constructed in production code;
+   only appears in test assertions.
+3. `CacheManager::now()` in `cache/mod.rs:142` — never called externally; all
+   callers use `self.clock.now()` directly.
+
+**Error handling — adequate, two minor improvements possible:**
+- `CacheIo` (4 call-sites: cache + config) and `Io` (1 call-site: terminal
+  render) are both legitimately used, but having two `io::Error` variants with
+  different semantics is a maintenance trap. → Consider renaming `Io` to
+  `TerminalIo` in a future polish pass. Not blocking.
+- `handle_fetch_result()` maps unexpected error types (CacheIo, CacheParse) to
+  generic "Something went wrong". Low risk — these errors don't flow through the
+  fetch pipeline in practice.
+
+**Issues identified (address in Break 3.1 and future steps):**
+1. Detail down-scroll unbounded (`event.rs:543` does `+= 1` with no upper bound).
+   Render clamps at draw time so no crash, but `detail_scroll_offset` can grow
+   arbitrarily large. → Fix in Break 3.1: inline a clamp in the key handler.
+2. Redundant `is_offline: bool` on `App` duplicates `error_state: Some(Offline)`.
+   Always set together in `handle_fetch_result()`. → Collapse during Break 3.2
+   event loop modularisation.
+3. Silent refresh denial — pressing `r` on a fresh cache silently clears the flag
+   with no UI feedback. → Address in Phase 7 (visual polish) with a transient
+   "Already up to date" message.
+4. Phase 8 needs explicit `Ctrl+C` handling via `tokio::signal::ctrl_c()` as a
+   `tokio::select!` branch. Current crossterm stream returns `None` on terminal
+   close but doesn't catch `SIGINT` directly. → Address in Step 8.1.
+
+---
+
+### Break 3.1 — Dead code cleanup ✅
 
 Investigate and resolve potentially dead code identified after Phase 6.
 These items produce compiler warnings and may be leftover from earlier
@@ -836,6 +895,17 @@ refactors:
   are handled through a different path now. Remove if dead.
 - `CacheManager::now()` in `src/cache/mod.rs` — may be a leftover after
   the generic `Clock` refactor. Remove if no longer needed.
+
+**Status:** Complete. All three dead code items removed:
+1. `clamp_scroll()` + 3 tests removed from `detail.rs` — scroll clamping was
+   already handled inline in `render_detail()`. Comment added to key handler
+   (`event.rs`) explaining the render-time clamp.
+2. `AppError::Config` variant + 2 tests removed from `error.rs` — never
+   constructed in production code.
+3. `CacheManager::now()` removed from `cache/mod.rs` — all callers used
+   `self.clock.now()` directly.
+4. Cleaned up 2 unused test imports (`App` in `detail.rs`, `UiConfig` in
+   `status_bar.rs`) exposed by the removals.
 
 Leave warnings that correspond to code written for later phases (e.g.
 `fetch_throttle_status`, rate limiter methods, pagination fields,
