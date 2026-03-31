@@ -8,7 +8,7 @@ pub const PROD_BASE_URL: &str = "https://ll.thespacedevs.com/2.3.0";
 
 // Endpoint paths (appended to the base URL).
 const LAUNCHES_UPCOMING: &str = "/launches/upcoming/";
-const LAUNCH_DETAIL: &str = "/launch/";
+const LAUNCH_DETAIL: &str = "/launches/";
 const API_THROTTLE: &str = "/api-throttle/";
 
 /// Build the URL for fetching upcoming launches.
@@ -125,7 +125,7 @@ mod tests {
         let url = launch_detail_url(DEV_BASE_URL, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
         assert_eq!(
             url,
-            "https://lldev.thespacedevs.com/2.3.0/launch/e3df2ecd-c239-472f-95e4-2b89b4f75800/"
+            "https://lldev.thespacedevs.com/2.3.0/launches/e3df2ecd-c239-472f-95e4-2b89b4f75800/"
         );
     }
 

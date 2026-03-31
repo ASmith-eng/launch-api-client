@@ -485,7 +485,7 @@ mod tests {
         let (client, server) = setup().await;
 
         Mock::given(method("GET"))
-            .and(path("/launch/e3df2ecd-c239-472f-95e4-2b89b4f75800/"))
+            .and(path("/launches/e3df2ecd-c239-472f-95e4-2b89b4f75800/"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_DETAIL_RESPONSE, "application/json"))
             .mount(&server)
             .await;
@@ -514,7 +514,7 @@ mod tests {
         let (client, server) = setup().await;
 
         Mock::given(method("GET"))
-            .and(path("/launch/nonexistent-id/"))
+            .and(path("/launches/nonexistent-id/"))
             .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
             .mount(&server)
             .await;
@@ -722,7 +722,7 @@ mod tests {
         let (client, server) = setup().await;
 
         Mock::given(method("GET"))
-            .and(path("/launch/nonexistent-id/"))
+            .and(path("/launches/nonexistent-id/"))
             .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
             .expect(1) // Exactly 1 request — no retry
             .mount(&server)
