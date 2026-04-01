@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            binary: launch-client
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            binary: launch-client.exe
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Package (Linux)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/release
+          tar czf ../../launch-client-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/release/${{ matrix.binary }}" -DestinationPath "launch-client-${{ github.ref_name }}-${{ matrix.target }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-client-${{ matrix.target }}
+          path: launch-client-${{ github.ref_name }}-${{ matrix.target }}.*
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            launch-client-*.tar.gz
+            launch-client-*.zip
+          body: |
+            ## Downloads
+
+            | Platform | File |
+            |----------|------|
+            | Linux (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
+            | Windows (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
+
+            ### Usage
+            Download the file for your platform, extract it, and run `launch-client` from your terminal.
