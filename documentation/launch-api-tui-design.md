@@ -64,7 +64,7 @@ The `api::client` module defines traits for fetching launch lists and details. T
 - **Development/testing**: `https://lldev.thespacedevs.com/2.3.0/` (less restrictive rate limits, potentially stale data)
 - **Production**: `https://ll.thespacedevs.com/2.3.0/`
 
-The base URL should be configurable (see User Configuration section) to allow switching between dev and production servers.
+The base URL is hardcoded in the vendor module (`src/vendor/launch_library_2/endpoints.rs`). The dev URL is used only in tests; the production URL is compiled into the release binary. This is intentional — end users should not need to switch between dev and production servers.
 
 ### Primary Endpoints
 
@@ -552,7 +552,7 @@ The help overlay is context-aware, showing different content depending on the cu
 
 #### Filter Panel
 
-An inline filter bar displayed below the title bar. Users press `f` to focus the filter panel, then use `Tab` to cycle between filter categories and `left`/`right` to change values within a category. Pressing `Enter` applies the selected filters and triggers an API request. Pressing `Esc` cancels filter changes.
+A centered overlay panel rendered on top of the list view. Users press `f` to open the filter panel, then use `Tab` to cycle between filter categories and `left`/`right` to change values within a category. Pressing `Enter` applies the selected filters and triggers an API request. Pressing `Esc` cancels filter changes. The overlay uses rounded Cyan borders and is positioned near the top of the screen.
 
 **Filter categories**:
 - **Status**: All, Go for Launch, TBD, TBC, On Hold, In Flight (maps to `status__ids` API parameter)
@@ -720,11 +720,6 @@ Located at: `<config_dir>/config.toml` (see §File Structure for platform paths)
 # Leave empty for unauthenticated usage
 api_key = ""
 
-# Base URL for the Launch Library 2 API
-# Use "https://lldev.thespacedevs.com/2.3.0" for development/testing
-# Use "https://ll.thespacedevs.com/2.3.0" for production
-base_url = "https://lldev.thespacedevs.com/2.3.0"
-
 [cache]
 # Time-to-live based on launch proximity (in minutes, range: 1–43200)
 # Past launches are cached permanently (data is final) — no config needed.
@@ -778,7 +773,6 @@ After deserialization, `Config::sanitize()` validates every field and replaces o
 | `prune_every_n_startups` | 1–50 | 0 would disable pruning; >50 is unreasonable |
 | `max_detail_age_days` | ≥ 1 | 0 would prune everything immediately |
 | `max_detail_files` | ≥ 1 | 0 would prune everything immediately |
-| `base_url` | Must start with `http://` or `https://` | Prevents non-HTTP schemes |
 | `time_format` | `"12h"` or `"24h"` | — |
 | `staleness_style` | `"relative"` or `"absolute"` | — |
 | `launches_per_page` | 1–100 | — |
@@ -856,7 +850,7 @@ The `version` field in each cache file (`app_state.json`, `cache.json`, `details
 - Perform a **single automatic retry** after a 1-second `tokio::time::sleep` (non-blocking — the event loop continues rendering during the pause)
 - If the retry also fails, display an inline error message where content would appear: `"Something went wrong fetching this data, please try again in a few minutes"`
 - Non-retryable errors (4xx, deserialization failures) skip the retry and display the error immediately
-- Show a brief "Retrying..." indicator during the retry attempt
+- Retries happen transparently within the HTTP layer (logged at `WARN` level); no separate UI indicator is shown since the retry resolves within ~1 second and the existing loading state provides sufficient feedback
 - If cached data exists, continue displaying it with a staleness indicator
 
 #### Rate Limit Errors (Client-detected or 429 response)

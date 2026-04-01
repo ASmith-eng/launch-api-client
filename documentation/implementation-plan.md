@@ -1104,15 +1104,64 @@ dependencies in unit tests.
 
 ---
 
+## Phase 9: Pagination & Live Countdown
+
+### Step 9.1 — Live countdown tick
+
+Add a periodic timer to the event loop so the countdown in the detail view
+updates in real-time without requiring user input.
+
+**Design ref:** §Time Display → Countdown Timer ("updates in the detail view")
+
+**Produce:**
+- A `tokio::time::interval` (e.g. 1 second) branch in the `tokio::select!`
+  loop in `src/tui/event.rs`
+- On each tick, re-render the current frame (the countdown is computed at
+  render time from `net`, so a re-render is sufficient)
+- The tick should only be active when on the Detail screen to avoid
+  unnecessary redraws on the list view
+- No new tests required — the countdown formatting is already covered;
+  this is a wiring change
+
+**Acceptance criteria:** With the detail view open for an upcoming launch,
+the countdown visibly decrements each second without any key presses.
+
+---
+
+### Step 9.2 — Pagination navigation
+
+Add page navigation to the list view so users can browse beyond the first
+page of results.
+
+**Design ref:** §Features (MVP) — "List view of upcoming launches with
+pagination (10/25/50 items)"; §Primary Endpoints — `?limit=` and `?offset=`
+
+**Produce:**
+- New key bindings: `n` (next page) and `p` (previous page) in list view
+  (`src/tui/keys.rs`)
+- Track `current_page` and `total_pages` (derived from `total_count` and
+  `launches_per_page`) in `App` (`src/tui/app.rs`)
+- On page change, set `app.launches` to empty + trigger a list fetch with
+  the appropriate `offset` value in `ListParams`
+- Update list title to show page indicator (e.g. "Page 1 of 6")
+- Update help overlay with new key bindings
+- Update status bar or hint bar to show page navigation hints when
+  multiple pages exist
+- Tests: page calculation (total_count / launches_per_page edge cases),
+  offset computation, key handler tests for n/p at first/last page
+
+**Acceptance criteria:** User can navigate between pages of results.
+`n` on the last page and `p` on the first page are no-ops. Page indicator
+updates correctly.
+
+---
+
 ## Open Questions
 
 Items identified during design review. Resolved items marked with ✅.
 
-1. **Pagination UX** (affects Step 4.2, 5.2)
-   Keybindings include no page navigation (Page Up/Down, "load more").
-   `launches_per_page` config exists and the API supports `limit`/`offset`,
-   but the interaction model for moving between pages is unspecified.
-   Decide: infinite scroll, explicit page buttons, or fixed single page?
+1. ✅ **Pagination UX** — resolved: explicit page navigation with `n`/`p`
+   keys, planned in Phase 9 (Step 9.2).
 
 2. ✅ **Detail view data model** — resolved in Break 1. A typed
    `LaunchDetail` struct will be added in Step 3.1 alongside the detail
@@ -1134,6 +1183,14 @@ Items identified during design review. Resolved items marked with ✅.
    the live LL2 API before Step 6.1 — query `/location/` endpoint and confirm
    that each region's location IDs match what the API returns. This is a manual
    prerequisite; do not start Step 6.1 until this is done.
+
+7. **Region filter "Other" catch-all** (affects Step 6.1)
+   The design specified an "Other" catch-all region option, but the
+   implementation uses "New Zealand" as the last specific region instead.
+   This means launches from unlisted regions (e.g. South Korea, French
+   Guiana, Israel) are not filterable. Consider whether to add an "Other"
+   option that maps to all location IDs not covered by the named regions,
+   or add more specific region entries.
 
 ---
 
@@ -1161,4 +1218,6 @@ Items identified during design review. Resolved items marked with ✅.
                               Break 2.2 → 5.1 → 5.2 → 6.1 → 6.2
                                                             ↓
                                                     7.1 → 8.1 → 8.2
+                                                                  ↓
+                                                          9.1 → 9.2
 ```
