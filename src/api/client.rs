@@ -4,10 +4,11 @@
 //! data. [`Ll2Client`] implements it using `reqwest` against the LL2 API, with
 //! integrated client-side rate limiting.
 
+use std::collections::VecDeque;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::api::rate_limiter::RateLimiter;
 use crate::clock::Clock;
@@ -20,6 +21,17 @@ use crate::vendor::launch_library_2::response_models::{
 
 /// Delay between the first failed attempt and the automatic retry.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// Hard ceiling on HTTP requests within [`REQUEST_CAP_WINDOW`].
+///
+/// This is a transport-layer safety net, independent of the application-layer
+/// rate limiter. It exists solely to prevent runaway request loops caused by
+/// bugs in fetch dispatch or sync logic. Normal usage (15–30 req/hour) will
+/// never approach this limit.
+const REQUEST_CAP: usize = 50;
+
+/// Rolling window for the request cap.
+const REQUEST_CAP_WINDOW: Duration = Duration::from_secs(600); // 10 minutes
 
 /// Result of a successful launch list fetch.
 #[derive(Debug)]
@@ -39,23 +51,21 @@ pub trait LaunchApi {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<LaunchDetail, AppError>> + Send;
-
-    fn fetch_throttle_status(
-        &self,
-    ) -> impl std::future::Future<Output = Result<ThrottleStatus, AppError>> + Send;
 }
 
 /// Launch Library 2 API client.
 ///
-/// Wraps `reqwest::Client` with rate limiting and API key injection.
-/// The rate limiter is behind a `Mutex` (never held across await points)
-/// to allow `&self` on trait methods.
+/// Wraps `reqwest::Client` with rate limiting, API key injection, and a
+/// transport-layer request cap as a safety net against runaway loops.
 #[derive(Debug)]
 pub struct Ll2Client<C: Clock> {
     http: reqwest::Client,
     base_url: String,
     api_key: Option<String>,
     rate_limiter: Mutex<RateLimiter<C>>,
+    /// Transport-layer safety net: timestamps of all HTTP requests sent
+    /// within the rolling window. Independent of the rate limiter.
+    request_log: Mutex<VecDeque<Instant>>,
 }
 
 impl<C: Clock> Ll2Client<C> {
@@ -75,6 +85,7 @@ impl<C: Clock> Ll2Client<C> {
             base_url,
             api_key,
             rate_limiter: Mutex::new(rate_limiter),
+            request_log: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -102,8 +113,43 @@ impl<C: Clock> Ll2Client<C> {
         }
     }
 
+    /// Check and record against the transport-layer request cap.
+    ///
+    /// Returns `Err` if the cap has been exceeded. This is a safety net —
+    /// if this ever fires, there is a bug in the application-layer logic.
+    fn check_request_cap(&self) -> Result<(), AppError> {
+        let now = Instant::now();
+        let mut log = self.request_log.lock().expect("request_log lock poisoned");
+
+        // Prune entries outside the rolling window.
+        while let Some(&front) = log.front() {
+            if now.duration_since(front) > REQUEST_CAP_WINDOW {
+                log.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if log.len() >= REQUEST_CAP {
+            error!(
+                cap = REQUEST_CAP,
+                window_secs = REQUEST_CAP_WINDOW.as_secs(),
+                "transport-layer request cap exceeded — this indicates a bug in fetch dispatch"
+            );
+            return Err(AppError::RequestCapExceeded(format!(
+                "Internal safety limit reached ({REQUEST_CAP} requests in {} minutes). \
+                 Please restart the app.",
+                REQUEST_CAP_WINDOW.as_secs() / 60,
+            )));
+        }
+
+        log.push_back(now);
+        Ok(())
+    }
+
     /// Send a request and map non-success status codes to `AppError`.
     async fn send_and_check(&self, url: &str) -> Result<reqwest::Response, AppError> {
+        self.check_request_cap()?;
         debug!(url, "sending API request");
         let response = self.request(url).send().await?;
 
@@ -237,6 +283,25 @@ impl<C: Clock> Ll2Client<C> {
             }
         }
     }
+
+    /// Fetch the current rate limit status from the `/api-throttle/` endpoint
+    /// and sync the local rate limiter.
+    ///
+    /// The throttle endpoint does NOT count against the rate limit.
+    #[cfg(test)]
+    pub async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
+        let status = self.fetch_throttle_raw().await?;
+        debug!(
+            remaining = status.remaining,
+            limit = status.limit,
+            "throttle sync complete"
+        );
+
+        let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+        limiter.record_sync(status.remaining, status.limit);
+
+        Ok(status)
+    }
 }
 
 impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
@@ -297,21 +362,6 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         let detail: LaunchDetail = ll2_detail.into();
         info!(launch_id = id, name = %detail.name, "fetched launch detail");
         Ok(detail)
-    }
-
-    async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
-        // Throttle endpoint does NOT count against the rate limit.
-        let status = self.fetch_throttle_raw().await?;
-        debug!(
-            remaining = status.remaining,
-            limit = status.limit,
-            "throttle sync complete"
-        );
-
-        let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
-        limiter.record_sync(status.remaining, status.limit);
-
-        Ok(status)
     }
 }
 
@@ -851,6 +901,7 @@ mod tests {
             base_url: server.uri(),
             api_key: None,
             rate_limiter: Mutex::new(limiter),
+            request_log: Mutex::new(VecDeque::new()),
         };
 
         // Respond with a 5-second delay — exceeds our 100ms timeout.
@@ -1012,5 +1063,69 @@ mod tests {
 
         let result = client.sync_throttle_with_retry().await;
         assert!(result.is_err());
+    }
+
+    // --- Transport-layer request cap tests ---
+
+    #[test]
+    fn request_cap_allows_requests_under_limit() {
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
+
+        for i in 0..REQUEST_CAP {
+            assert!(
+                client.check_request_cap().is_ok(),
+                "request {i} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn request_cap_blocks_at_limit() {
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
+
+        // Fill up to the cap.
+        for _ in 0..REQUEST_CAP {
+            client.check_request_cap().unwrap();
+        }
+
+        // Next request should be blocked.
+        let result = client.check_request_cap();
+        assert!(result.is_err(), "request at cap should be blocked");
+
+        match result.unwrap_err() {
+            AppError::RequestCapExceeded(message) => {
+                assert!(
+                    message.contains("safety limit"),
+                    "error message should mention safety limit, got: {message}"
+                );
+            }
+            other => panic!("expected RequestCapExceeded, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn request_cap_prunes_expired_entries() {
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+        let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
+
+        // Backdate entries to just outside the window.
+        {
+            let mut log = client.request_log.lock().unwrap();
+            let past = Instant::now() - REQUEST_CAP_WINDOW - Duration::from_secs(1);
+            for _ in 0..REQUEST_CAP {
+                log.push_back(past);
+            }
+        }
+
+        // Despite the log being full, all entries are expired — should succeed.
+        assert!(
+            client.check_request_cap().is_ok(),
+            "expired entries should be pruned, allowing new requests"
+        );
     }
 }

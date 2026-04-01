@@ -18,6 +18,7 @@ use api::rate_limiter::RateLimiter;
 use cache::CacheManager;
 use clock::{Clock, SystemClock};
 use config::{load_config, AppDirs};
+use vendor::launch_library_2::endpoints::PROD_BASE_URL;
 use models::{AppState, CACHE_VERSION};
 use tui::app::App;
 use tui::event::run_event_loop;
@@ -45,7 +46,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!(
-        base_url = %config.api.base_url,
+        base_url = PROD_BASE_URL,
         authenticated = !config.api.api_key.is_empty(),
         log_level = %config.log.level,
         launches_per_page = config.ui.launches_per_page,
@@ -96,10 +97,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 4. Create API client with rate limiter from persisted state.
+    //    Update the authenticated flag before restoring, so the rate limiter
+    //    uses the correct limit (15 unauth / 30 auth) even if the user
+    //    added or removed an API key since the last session.
     let authenticated = !config.api.api_key.is_empty();
+    app_state.rate_limit.authenticated = authenticated;
     let rate_limiter = RateLimiter::from_state(clock, &app_state.rate_limit);
     let api_client = Arc::new(Ll2Client::new(
-        config.api.base_url.clone(),
+        PROD_BASE_URL.to_string(),
         if authenticated {
             Some(config.api.api_key.clone())
         } else {

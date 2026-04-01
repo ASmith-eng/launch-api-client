@@ -113,6 +113,7 @@ mod string_or_image_object {
 
 /// Paginated response wrapper used by all LL2 list endpoints.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct PaginatedResponse<T> {
     pub count: u32,
     pub next: Option<String>,
@@ -136,6 +137,7 @@ pub struct Ll2Launch {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Ll2Status {
     pub id: u32,
     pub name: String,
@@ -316,6 +318,7 @@ pub struct Ll2Program {
 /// }
 /// ```
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Ll2ThrottleResponse {
     pub your_request_limit: u32,
     pub current_use: u32,

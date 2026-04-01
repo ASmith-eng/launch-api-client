@@ -32,8 +32,6 @@ pub struct Config {
 pub struct ApiConfig {
     /// Optional API key for higher rate limits (30/hr vs 15/hr).
     pub api_key: String,
-    /// Base URL for the Launch Library 2 API.
-    pub base_url: String,
 }
 
 /// Cache TTL and pruning settings.
@@ -91,7 +89,6 @@ impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
-            base_url: "https://lldev.thespacedevs.com/2.3.0".into(),
         }
     }
 }
@@ -150,24 +147,9 @@ impl Config {
     /// values (e.g. `prune_every_n_startups = 0`, path traversal in log file
     /// name) don't cause surprising behaviour at runtime.
     pub fn sanitize(&mut self) {
-        self.api.sanitize();
         self.cache.sanitize();
         self.ui.sanitize();
         self.log.sanitize();
-    }
-}
-
-impl ApiConfig {
-    fn sanitize(&mut self) {
-        let defaults = Self::default();
-        if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
-            warn!(
-                value = %self.base_url,
-                default = %defaults.base_url,
-                "Invalid base_url (must be http/https), using default"
-            );
-            self.base_url = defaults.base_url;
-        }
     }
 }
 
@@ -387,7 +369,6 @@ mod tests {
     #[test]
     fn default_config_has_expected_values() {
         let config = Config::default();
-        assert_eq!(config.api.base_url, "https://lldev.thespacedevs.com/2.3.0");
         assert!(config.api.api_key.is_empty());
         assert_eq!(config.cache.ttl_far_future, 1440);
         assert_eq!(config.cache.ttl_near_future, 180);
@@ -422,7 +403,6 @@ mod tests {
             r#"
 [api]
 api_key = "my-secret-key"
-base_url = "https://ll.thespacedevs.com/2.3.0"
 
 [cache]
 ttl_far_future = 720
@@ -439,7 +419,6 @@ level = "debug"
 
         let config = load_config(&path);
         assert_eq!(config.api.api_key, "my-secret-key");
-        assert_eq!(config.api.base_url, "https://ll.thespacedevs.com/2.3.0");
         assert_eq!(config.cache.ttl_far_future, 720);
         // Unset keys keep defaults
         assert_eq!(config.cache.ttl_near_future, 180);
@@ -650,40 +629,6 @@ ttl_active = 2
         assert_eq!(config.cache.ttl_near_future, 60);
         assert_eq!(config.cache.ttl_imminent, 10);
         assert_eq!(config.cache.ttl_active, 2);
-    }
-
-    #[test]
-    fn sanitize_invalid_base_url_reset_to_default() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("config.toml");
-        fs::write(
-            &path,
-            r#"
-[api]
-base_url = "ftp://evil.example.com"
-"#,
-        )
-        .unwrap();
-
-        let config = load_config(&path);
-        assert_eq!(config.api.base_url, ApiConfig::default().base_url);
-    }
-
-    #[test]
-    fn sanitize_valid_https_url_unchanged() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("config.toml");
-        fs::write(
-            &path,
-            r#"
-[api]
-base_url = "https://ll.thespacedevs.com/2.3.0"
-"#,
-        )
-        .unwrap();
-
-        let config = load_config(&path);
-        assert_eq!(config.api.base_url, "https://ll.thespacedevs.com/2.3.0");
     }
 
     #[test]

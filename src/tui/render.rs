@@ -97,12 +97,16 @@ fn render_error(frame: &mut ratatui::Frame, area: Rect, error_state: &ErrorState
             )
         }
         ErrorState::Offline => "Network offline".to_string(),
+        ErrorState::RequestCapExceeded => {
+            "Safety limit reached — too many requests. Please restart the app.".to_string()
+        }
     };
 
     let style = match error_state {
         ErrorState::Transient { .. } => Style::default().fg(Color::Yellow),
-        ErrorState::RateLimited { .. } => Style::default().fg(Color::Red),
-        ErrorState::Offline => Style::default().fg(Color::Red),
+        ErrorState::RateLimited { .. } | ErrorState::Offline | ErrorState::RequestCapExceeded => {
+            Style::default().fg(Color::Red)
+        }
     };
 
     // Render at the bottom of the screen area.

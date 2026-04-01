@@ -1,6 +1,7 @@
 //! Base URL constants, endpoint paths, and query parameter building for LL2.
 
-/// Default base URL (development server — less restrictive rate limits).
+/// Development server URL (used in tests — less restrictive rate limits).
+#[cfg(test)]
 pub const DEV_BASE_URL: &str = "https://lldev.thespacedevs.com/2.3.0";
 
 /// Production base URL.

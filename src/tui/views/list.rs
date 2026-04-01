@@ -5,7 +5,7 @@
 //! blank separator line.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -335,6 +335,7 @@ mod tests {
     // --- TestBackend rendering tests ---
 
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
     use ratatui::Terminal;
     use crate::models::{
         LaunchStatus, LocationInfo, PadInfo, Provider, NetPrecision,

@@ -32,8 +32,8 @@ use crate::config::CacheConfig;
 use crate::error::AppError;
 use crate::tui::app::App;
 use crate::tui::fetch::{
-    check_needs_fetch, dismiss_expired_errors, handle_fetch_result, maybe_load_detail_from_disk,
-    spawn_fetch, FetchResult,
+    check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors, handle_fetch_result,
+    maybe_load_detail_from_disk, spawn_fetch, FetchResult,
 };
 use crate::tui::keys::handle_key;
 use crate::tui::render::render;
@@ -63,8 +63,11 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
         maybe_load_detail_from_disk(app, cache_manager);
 
         // State-driven fetch dispatch: check if the current screen needs data.
+        // Proactive throttle sync takes priority (cheap, keeps rate limit accurate).
         if pending.is_none() {
-            if let Some(kind) = check_needs_fetch(app) {
+            if let Some(kind) = check_needs_throttle_sync(app, &client) {
+                pending = Some(spawn_fetch(kind, &client, app));
+            } else if let Some(kind) = check_needs_fetch(app) {
                 app.refresh_requested = false;
                 app.loading = true;
                 pending = Some(spawn_fetch(kind, &client, app));
@@ -105,7 +108,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
             }
 
             result = async { pending.as_mut().unwrap().as_mut().await },
-                if pending.is_some() && app.loading => {
+                if pending.is_some() => {
                 pending = None;
                 handle_fetch_result(app, &client, cache_manager, cache_config, result);
             }

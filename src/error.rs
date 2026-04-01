@@ -25,6 +25,8 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     Io(std::io::Error),
 
+    #[error("Request safety cap exceeded: {0}")]
+    RequestCapExceeded(String),
 }
 
 impl AppError {
@@ -70,6 +72,9 @@ pub enum ErrorState {
     RateLimited { available_at: DateTime<Utc> },
     /// Network is unreachable — persists until a successful request.
     Offline,
+    /// Transport-layer request cap exceeded — persists until restart.
+    /// This should never happen in normal operation; it indicates a bug.
+    RequestCapExceeded,
 }
 
 #[cfg(test)]

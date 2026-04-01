@@ -39,6 +39,8 @@ pub const TRANSIENT_DISMISS_SECS: u64 = 10;
 pub enum FetchKind {
     LaunchList,
     LaunchDetail(String),
+    /// Proactive rate limit sync via `/api-throttle/`.
+    ThrottleSync,
 }
 
 /// Result from an async fetch operation dispatched from the event loop.
@@ -54,8 +56,27 @@ pub enum FetchResult {
         launch_id: String,
         detail: Box<crate::models::LaunchDetail>,
     },
+    /// Throttle sync completed successfully.
+    ThrottleSync,
     /// Fetch failed.
     Error(AppError),
+}
+
+/// Check whether a proactive rate limit sync is needed.
+///
+/// Returns `Some(ThrottleSync)` when the rate limiter's `should_sync()`
+/// triggers (remaining <= 2, never synced, or >1 hour since last sync).
+/// Only fires when no fetch is in progress and the app isn't in an error state.
+pub fn check_needs_throttle_sync<C: Clock>(app: &App, client: &Ll2Client<C>) -> Option<FetchKind> {
+    if app.loading || app.error_state.is_some() {
+        return None;
+    }
+    if client.rate_limiter().should_sync() {
+        debug!("proactive throttle sync needed");
+        Some(FetchKind::ThrottleSync)
+    } else {
+        None
+    }
 }
 
 /// Determine if the current screen state requires a fetch.
@@ -188,6 +209,19 @@ pub fn spawn_fetch<C: Clock + Send + Sync + 'static>(
             let c = Arc::clone(client);
             Box::pin(fetch_launch_detail(c, id))
         }
+        FetchKind::ThrottleSync => {
+            let c = Arc::clone(client);
+            Box::pin(async move {
+                match c.sync_throttle_with_retry().await {
+                    Ok(_) => FetchResult::ThrottleSync,
+                    Err(e) => {
+                        // Graceful degradation — log and continue with local tracking.
+                        warn!(error = %e, "proactive throttle sync failed");
+                        FetchResult::ThrottleSync
+                    }
+                }
+            })
+        }
     }
 }
 
@@ -292,11 +326,18 @@ pub fn handle_fetch_result<C: Clock>(
             // Store in memory.
             app.detail_cache.insert(launch_id, cached);
         }
+        FetchResult::ThrottleSync => {
+            // Sync completed (success or graceful degradation) — no UI update
+            // needed beyond the rate limit display, which is updated below.
+            debug!("proactive throttle sync complete");
+        }
         FetchResult::Error(err) => {
             // Always log the full error detail for debugging.
             warn!(error = %err, error_debug = ?err, "fetch failed");
 
-            if err.is_offline_signal() {
+            if let AppError::RequestCapExceeded(_) = &err {
+                app.error_state = Some(ErrorState::RequestCapExceeded);
+            } else if err.is_offline_signal() {
                 app.error_state = Some(ErrorState::Offline);
             } else if let AppError::RateLimited(available_at) = err {
                 app.error_state = Some(ErrorState::RateLimited { available_at });

@@ -18,6 +18,10 @@ const DEFAULT_LIMIT_AUTH: usize = 30;
 /// Sync when remaining requests are at or below this threshold.
 const SYNC_REMAINING_THRESHOLD: usize = 2;
 
+/// Minimum interval between syncs triggered by the "close to limit" condition.
+/// Prevents a tight sync loop when the server confirms we're genuinely at the limit.
+const SYNC_COOLDOWN_SECS: i64 = 300; // 5 minutes
+
 /// Client-side rate limiter using a rolling-window log.
 ///
 /// Tracks timestamps of API requests within a 1-hour rolling window.
@@ -32,7 +36,8 @@ pub struct RateLimiter<C: Clock> {
 }
 
 impl<C: Clock> RateLimiter<C> {
-    /// Create a new rate limiter with no request history.
+    /// Create a new rate limiter with no request history (used in tests).
+    #[cfg(test)]
     pub fn new(clock: C, authenticated: bool) -> Self {
         let limit = if authenticated {
             DEFAULT_LIMIT_AUTH
@@ -74,12 +79,6 @@ impl<C: Clock> RateLimiter<C> {
             last_sync: self.last_sync.unwrap_or(self.clock.now()),
             authenticated: self.authenticated,
         }
-    }
-
-    /// Whether a request can be made without exceeding the rate limit.
-    pub fn can_make_request(&mut self) -> bool {
-        self.prune_expired();
-        self.requests.len() < self.limit
     }
 
     /// Record that a request was just made. Returns `Err(AppError::RateLimited)`
@@ -126,24 +125,24 @@ impl<C: Clock> RateLimiter<C> {
     /// 2. Remaining requests <= 2
     /// 3. Last sync was more than 1 hour ago
     pub fn should_sync(&mut self) -> bool {
-        // Never synced
         let Some(last) = self.last_sync else {
             return true;
         };
 
-        // Close to limit
-        if self.remaining() <= SYNC_REMAINING_THRESHOLD {
-            return true;
-        }
-
-        // More than 1 hour since last sync
         let now = self.clock.now();
         let elapsed = now.signed_duration_since(last);
-        if elapsed >= TimeDelta::seconds(WINDOW_SECS) {
+
+        // Close to limit — but only if we haven't synced recently.
+        // Without the cooldown, remaining == 0 after a fresh sync would
+        // trigger an infinite sync loop.
+        if self.remaining() <= SYNC_REMAINING_THRESHOLD
+            && elapsed >= TimeDelta::seconds(SYNC_COOLDOWN_SECS)
+        {
             return true;
         }
 
-        false
+        // Long-running session — full window has elapsed since last sync.
+        elapsed >= TimeDelta::seconds(WINDOW_SECS)
     }
 
     /// Update the rate limiter after a successful `/api-throttle/` sync.
@@ -176,16 +175,6 @@ impl<C: Clock> RateLimiter<C> {
                 self.requests.push_back(now);
             }
         }
-    }
-
-    /// Update authentication status (e.g. after learning an API key is set).
-    pub fn set_authenticated(&mut self, authenticated: bool) {
-        self.authenticated = authenticated;
-        self.limit = if authenticated {
-            DEFAULT_LIMIT_AUTH
-        } else {
-            DEFAULT_LIMIT_UNAUTH
-        };
     }
 
     /// Remove request timestamps that have fallen outside the rolling window.
@@ -223,7 +212,6 @@ mod tests {
     fn new_limiter_has_full_capacity() {
         let (mut limiter, _clock) = make_limiter();
         assert_eq!(limiter.remaining(), 15);
-        assert!(limiter.can_make_request());
     }
 
     #[test]
@@ -250,7 +238,6 @@ mod tests {
             limiter.record_request().unwrap();
         }
         assert_eq!(limiter.remaining(), 0);
-        assert!(!limiter.can_make_request());
 
         let result = limiter.record_request();
         assert!(result.is_err());
@@ -277,7 +264,6 @@ mod tests {
         // Advance 1 hour — all requests should expire
         clock.advance(TimeDelta::hours(1));
         assert_eq!(limiter.remaining(), 15);
-        assert!(limiter.can_make_request());
     }
 
     #[test]
@@ -346,8 +332,8 @@ mod tests {
     }
 
     #[test]
-    fn should_sync_when_close_to_limit() {
-        let (mut limiter, _clock) = make_limiter();
+    fn should_sync_when_close_to_limit_after_cooldown() {
+        let (mut limiter, clock) = make_limiter();
         limiter.record_sync(15, 15);
 
         // Use up requests until remaining <= 2
@@ -355,7 +341,25 @@ mod tests {
             limiter.record_request().unwrap();
         }
         assert_eq!(limiter.remaining(), 2);
+
+        // Just synced — cooldown prevents immediate re-sync.
+        assert!(!limiter.should_sync());
+
+        // After cooldown (5 min), the close-to-limit condition triggers.
+        clock.advance(TimeDelta::minutes(5));
         assert!(limiter.should_sync());
+    }
+
+    #[test]
+    fn should_not_sync_in_tight_loop_when_at_limit() {
+        let (mut limiter, _clock) = make_limiter();
+        // Server confirms 0 remaining via sync.
+        limiter.record_sync(0, 15);
+        assert_eq!(limiter.remaining(), 0);
+
+        // Despite remaining == 0, should_sync is false because we just synced
+        // (cooldown prevents tight loop).
+        assert!(!limiter.should_sync());
     }
 
     #[test]
@@ -378,7 +382,6 @@ mod tests {
 
         assert_eq!(limiter.limit(), 30);
         assert_eq!(limiter.remaining(), 28);
-        // Should not need sync immediately after syncing
         assert!(!limiter.should_sync());
     }
 
@@ -445,21 +448,6 @@ mod tests {
         assert_eq!(limiter.remaining(), 14); // only 1 request in window
     }
 
-    // --- set_authenticated ---
-
-    #[test]
-    fn set_authenticated_updates_limit() {
-        let (mut limiter, _clock) = make_limiter();
-        assert_eq!(limiter.limit(), 15);
-
-        limiter.set_authenticated(true);
-        assert_eq!(limiter.limit(), 30);
-        assert_eq!(limiter.remaining(), 30);
-
-        limiter.set_authenticated(false);
-        assert_eq!(limiter.limit(), 15);
-    }
-
     // --- Edge cases ---
 
     #[test]
@@ -478,7 +466,6 @@ mod tests {
         // so future timestamps won't be pruned. But they should still
         // be counted toward the limit.
         assert_eq!(limiter.remaining(), 10);
-        assert!(limiter.can_make_request());
     }
 
     #[test]
