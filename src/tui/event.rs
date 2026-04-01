@@ -20,7 +20,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use tokio::signal;
 use tracing::debug;
@@ -95,7 +95,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
 
             maybe_event = reader.next() => {
                 match maybe_event {
-                    Some(Ok(Event::Key(key))) => handle_key(app, key),
+                    Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => handle_key(app, key),
                     Some(Ok(Event::Resize(cols, rows))) => {
                         app.terminal_size = (cols, rows);
                     }
