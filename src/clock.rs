@@ -104,4 +104,26 @@ mod tests {
         clock.set(new_time);
         assert_eq!(clock.now(), new_time);
     }
+
+    #[test]
+    fn fake_clock_backward_jump() {
+        let start = DateTime::parse_from_rfc3339("2026-06-01T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let clock = FakeClock::new(start);
+        // Jump backward by 1 hour.
+        clock.advance(TimeDelta::hours(-1));
+        assert_eq!(clock.now(), start - TimeDelta::hours(1));
+    }
+
+    #[test]
+    fn fake_clock_clones_share_state() {
+        let start = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let clock1 = FakeClock::new(start);
+        let clock2 = clock1.clone();
+        clock1.advance(TimeDelta::hours(5));
+        assert_eq!(clock2.now(), start + TimeDelta::hours(5));
+    }
 }

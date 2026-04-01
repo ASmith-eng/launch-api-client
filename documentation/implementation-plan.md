@@ -1045,7 +1045,7 @@ phases. The remaining gap — OS-level SIGINT handling — was added:
 
 ---
 
-### Step 8.2 — Testing and hardening
+### Step 8.2 — Testing and hardening ✅
 
 Comprehensive test pass across all modules. Reference design doc §Testing
 Strategy for full specification of test infrastructure, test categories, and
@@ -1075,6 +1075,32 @@ edge cases.
 **Acceptance criteria:** `cargo test` passes. All scenarios from the design
 doc §Testing Strategy have been exercised. No `thread::sleep` or wall-clock
 dependencies in unit tests.
+
+**Completed.** 396 tests passing (38 new). Test gaps from the design doc
+§Testing Strategy are now covered:
+
+- **Vendor mappings** (status_map.rs) — 8 new tests verifying each status
+  ID (1–8) has correct name, abbreviation, color, and bold modifier.
+  `unknown_status_style()` → gray fallback verified.
+- **Error classification** (error.rs) — 6 new tests: `ApiParse` not
+  retryable/not offline signal, `ApiError` boundary values (499→not
+  retryable, 500→retryable, 599→retryable, 600→not retryable).
+- **API client integration** (api/client.rs) — 3 new wiremock tests:
+  timeout (100ms client vs 5s server delay, verifies `is_retryable()` +
+  `is_offline_signal()`), empty results array parsing, filter query
+  parameter verification via wiremock matchers.
+- **UI rendering** (tui/views/list.rs, detail.rs) — 10 new
+  `TestBackend` tests: empty list message, loading state message, status
+  badge text ([Go], [TBD]), staleness indicator appearance, title count
+  display, [Filtered] indicator, detail loading/not-found/cached states.
+- **Edge cases** — Clock skew: 3 cache tests (backward jump + stale,
+  strategy shift), 2 clock module tests (backward advance, clone-shares-
+  state). Large content: 10KB+ description renders without layout
+  corruption, scroll offset exercised. Unicode: CJK launch names +
+  locations in both list and detail views. Cache expiry boundaries: 3
+  status transition tests (Go→Success, Go→Failure, Go→InFlight).
+- **No `thread::sleep` or wall-clock deps in unit tests** — all
+  time-dependent tests use `FakeClock`.
 
 ---
 

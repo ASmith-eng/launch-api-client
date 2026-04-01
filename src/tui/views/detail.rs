@@ -1030,4 +1030,187 @@ mod tests {
         let lines = build_content_lines(&detail, 120);
         assert!(!lines.is_empty());
     }
+
+    // --- TestBackend rendering tests ---
+
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use crate::tui::app::App;
+    use crate::models::LaunchDetailCache;
+
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn render_detail_loading_shows_fetching_message() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new((120, 30));
+        app.loading = true;
+
+        terminal
+            .draw(|frame| {
+                render_detail(frame, frame.area(), "some-id", &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Fetching launch details"),
+            "loading detail should show 'Fetching launch details', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_detail_not_found_shows_back_hint() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new((120, 30));
+
+        terminal
+            .draw(|frame| {
+                render_detail(frame, frame.area(), "missing-id", &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("No detail data available"),
+            "missing detail should show not-available message, got:\n{text}"
+        );
+        assert!(
+            text.contains("Esc"),
+            "missing detail should hint about Esc key, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_large_description_does_not_corrupt_layout() {
+        // 10KB+ mission description — edge case from design doc.
+        let mut detail = rich_detail();
+        // 10KB+ description with spaces so word-wrap actually wraps.
+        let large_desc = "The quick brown fox jumps over the lazy dog. "
+            .repeat(250); // ~11KB
+        detail.mission = Some(MissionSummary {
+            name: "Big Mission".into(),
+            mission_type: "Test".into(),
+            description: Some(large_desc),
+            orbit: None,
+        });
+
+        // Build content lines — should not panic or produce zero lines.
+        let lines = build_content_lines(&detail, 120);
+        assert!(
+            lines.len() > 50,
+            "10KB description should produce many wrapped lines, got {}",
+            lines.len()
+        );
+
+        // Also test rendering to TestBackend with scrolling.
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new((120, 30));
+        let launch_id = detail.id.clone();
+        app.detail_cache.insert(
+            launch_id.clone(),
+            LaunchDetailCache {
+                version: 1,
+                launch_id: launch_id.clone(),
+                fetched_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+                ttl_strategy: "short_term".into(),
+                data: detail,
+            },
+        );
+        app.detail_scroll_offset = 20; // Scroll down into the description.
+
+        terminal
+            .draw(|frame| {
+                render_detail(frame, frame.area(), &launch_id, &app);
+            })
+            .unwrap();
+
+        // Should render without panic. Content should exist.
+        let text = buffer_text(&terminal);
+        assert!(!text.is_empty());
+    }
+
+    #[test]
+    fn render_unicode_launch_name_does_not_panic() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new((120, 30));
+        let mut detail = rich_detail();
+        detail.name = "长征五号 Ŷ CZ-5 • 嫦娥六号 🚀".into();
+        detail.pad.location.name = "文昌航天发射场, 海南, 中国".into();
+        let launch_id = detail.id.clone();
+        app.detail_cache.insert(
+            launch_id.clone(),
+            LaunchDetailCache {
+                version: 1,
+                launch_id: launch_id.clone(),
+                fetched_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+                ttl_strategy: "short_term".into(),
+                data: detail,
+            },
+        );
+
+        terminal
+            .draw(|frame| {
+                render_detail(frame, frame.area(), &launch_id, &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("长征五号") || text.contains("CZ-5"),
+            "unicode characters should render, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_detail_with_cached_data_shows_launch_name() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new((120, 30));
+        let detail = rich_detail();
+        let launch_id = detail.id.clone();
+        app.detail_cache.insert(
+            launch_id.clone(),
+            LaunchDetailCache {
+                version: 1,
+                launch_id: launch_id.clone(),
+                fetched_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+                ttl_strategy: "short_term".into(),
+                data: detail,
+            },
+        );
+
+        terminal
+            .draw(|frame| {
+                render_detail(frame, frame.area(), &launch_id, &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Starship IFT-7"),
+            "detail with cached data should show launch name, got:\n{text}"
+        );
+        assert!(
+            text.contains("SpaceX"),
+            "detail should show provider, got:\n{text}"
+        );
+    }
 }

@@ -207,6 +207,56 @@ mod tests {
     }
 
     #[test]
+    fn api_parse_is_not_retryable() {
+        let raw = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = AppError::ApiParse(raw);
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn api_parse_is_not_offline_signal() {
+        let raw = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = AppError::ApiParse(raw);
+        assert!(!err.is_offline_signal());
+    }
+
+    #[test]
+    fn api_error_boundary_499_is_not_retryable() {
+        let err = AppError::ApiError {
+            status: 499,
+            message: "Client Error".into(),
+        };
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn api_error_boundary_500_is_retryable() {
+        let err = AppError::ApiError {
+            status: 500,
+            message: "Internal Server Error".into(),
+        };
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn api_error_boundary_599_is_retryable() {
+        let err = AppError::ApiError {
+            status: 599,
+            message: "Server Error".into(),
+        };
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn api_error_600_is_not_retryable() {
+        let err = AppError::ApiError {
+            status: 600,
+            message: "Unknown".into(),
+        };
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
     fn cache_io_and_io_are_distinct() {
         let cache_err = AppError::CacheIo(std::io::Error::new(
             std::io::ErrorKind::NotFound,

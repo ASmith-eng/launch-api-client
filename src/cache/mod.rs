@@ -1328,4 +1328,105 @@ mod tests {
         clock.advance(TimeDelta::days(11));
         assert_eq!(mgr.prune_details(&config).unwrap(), 2);
     }
+
+    // =====================================================================
+    // Clock skew edge cases (step 8.2)
+    // =====================================================================
+
+    #[test]
+    fn clock_backward_jump_stale_cache_handled_correctly() {
+        let now = base_time();
+        let list = LaunchListCache {
+            version: CACHE_VERSION,
+            fetched_at: now,
+            expires_at: now + TimeDelta::minutes(30),
+            total_count: 0,
+            launches: vec![],
+        };
+        // Clock jumps backward 1 hour — expires_at is now in the future
+        // relative to the jumped-back time.
+        let jumped_back = now - TimeDelta::hours(1);
+        assert!(!list.is_stale(jumped_back));
+    }
+
+    #[test]
+    fn clock_backward_jump_detail_cache_handled_correctly() {
+        let now = base_time();
+        let detail = LaunchDetailCache {
+            version: CACHE_VERSION,
+            launch_id: "test".into(),
+            fetched_at: now,
+            expires_at: now + TimeDelta::minutes(5),
+            ttl_strategy: "short_term".into(),
+            data: dummy_launch_detail(),
+        };
+        // Clock jumps backward — detail should not be considered stale.
+        let jumped_back = now - TimeDelta::minutes(30);
+        assert!(!detail.is_stale(jumped_back));
+    }
+
+    #[test]
+    fn clock_backward_jump_strategy_treats_as_imminent() {
+        let now = base_time();
+        let net = now + TimeDelta::days(2);
+        // Clock jumps backward by 10 days — net is now >7 days away.
+        let jumped_back = now - TimeDelta::days(10);
+        let strategy = CacheStrategy::for_launch(1, net, jumped_back);
+        assert_eq!(strategy, CacheStrategy::LongTerm);
+    }
+
+    // =====================================================================
+    // Cache expiry boundary: in-flight status transitions (step 8.2)
+    // =====================================================================
+
+    #[test]
+    fn strategy_transitions_from_go_to_success() {
+        let now = base_time();
+        let net = now - TimeDelta::hours(2); // NET was 2 hours ago
+
+        // Before launch: Go (status 1) → ShortTerm (past NET, still active)
+        assert_eq!(
+            CacheStrategy::for_launch(1, net, now),
+            CacheStrategy::ShortTerm
+        );
+        // After success: status 3 → Permanent
+        assert_eq!(
+            CacheStrategy::for_launch(3, net, now),
+            CacheStrategy::Permanent
+        );
+    }
+
+    #[test]
+    fn strategy_transitions_from_go_to_failure() {
+        let now = base_time();
+        let net = now - TimeDelta::hours(1);
+
+        // Before: Go → ShortTerm
+        assert_eq!(
+            CacheStrategy::for_launch(1, net, now),
+            CacheStrategy::ShortTerm
+        );
+        // After failure: status 4 → Permanent
+        assert_eq!(
+            CacheStrategy::for_launch(4, net, now),
+            CacheStrategy::Permanent
+        );
+    }
+
+    #[test]
+    fn strategy_transitions_from_go_to_in_flight() {
+        let now = base_time();
+        let net = now - TimeDelta::minutes(10);
+
+        // Go → ShortTerm
+        assert_eq!(
+            CacheStrategy::for_launch(1, net, now),
+            CacheStrategy::ShortTerm
+        );
+        // In-flight (status 6) → RealTime
+        assert_eq!(
+            CacheStrategy::for_launch(6, net, now),
+            CacheStrategy::RealTime
+        );
+    }
 }

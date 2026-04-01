@@ -89,8 +89,79 @@ mod tests {
     #[test]
     fn go_for_launch_is_green_bold() {
         let s = status_style(1).unwrap();
+        assert_eq!(s.name, "Go for Launch");
         assert_eq!(s.abbrev, "Go");
         assert_eq!(s.style.fg, Some(Color::Green));
         assert!(s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn tbd_is_yellow() {
+        let s = status_style(2).unwrap();
+        assert_eq!(s.name, "To Be Determined");
+        assert_eq!(s.abbrev, "TBD");
+        assert_eq!(s.style.fg, Some(Color::Yellow));
+        assert!(!s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn launch_successful_is_green() {
+        let s = status_style(3).unwrap();
+        assert_eq!(s.name, "Launch Successful");
+        assert_eq!(s.abbrev, "Success");
+        assert_eq!(s.style.fg, Some(Color::Green));
+        assert!(!s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn launch_failure_is_red_bold() {
+        let s = status_style(4).unwrap();
+        assert_eq!(s.name, "Launch Failure");
+        assert_eq!(s.abbrev, "Failure");
+        assert_eq!(s.style.fg, Some(Color::Red));
+        assert!(s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn on_hold_is_yellow_bold() {
+        let s = status_style(5).unwrap();
+        assert_eq!(s.name, "On Hold");
+        assert_eq!(s.abbrev, "Hold");
+        assert_eq!(s.style.fg, Some(Color::Yellow));
+        assert!(s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn in_flight_is_cyan_bold() {
+        let s = status_style(6).unwrap();
+        assert_eq!(s.name, "In Flight");
+        assert_eq!(s.abbrev, "In Flight");
+        assert_eq!(s.style.fg, Some(Color::Cyan));
+        assert!(s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn partial_failure_is_red() {
+        let s = status_style(7).unwrap();
+        assert_eq!(s.name, "Partial Failure");
+        assert_eq!(s.abbrev, "P. Failure");
+        assert_eq!(s.style.fg, Some(Color::Red));
+        assert!(!s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn tbc_is_yellow() {
+        let s = status_style(8).unwrap();
+        assert_eq!(s.name, "To Be Confirmed");
+        assert_eq!(s.abbrev, "TBC");
+        assert_eq!(s.style.fg, Some(Color::Yellow));
+        assert!(!s.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn unknown_status_style_is_gray() {
+        let s = unknown_status_style();
+        assert_eq!(s.fg, Some(Color::Gray));
+        assert!(!s.add_modifier.contains(Modifier::BOLD));
     }
 }

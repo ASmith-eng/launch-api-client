@@ -331,4 +331,247 @@ mod tests {
         assert_eq!(text, "[UNK]");
         assert_eq!(style.fg, Some(Color::Gray));
     }
+
+    // --- TestBackend rendering tests ---
+
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use crate::models::{
+        LaunchStatus, LocationInfo, PadInfo, Provider, NetPrecision,
+    };
+
+    fn make_test_terminal(width: u16, height: u16) -> Terminal<TestBackend> {
+        let backend = TestBackend::new(width, height);
+        Terminal::new(backend).unwrap()
+    }
+
+    fn sample_launch(name: &str, status_id: u32, status_abbrev: &str) -> LaunchSummary {
+        LaunchSummary {
+            id: "test-id".into(),
+            name: name.into(),
+            net: chrono::DateTime::parse_from_rfc3339("2026-06-01T12:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            net_precision: Some(NetPrecision {
+                id: 1,
+                name: "Day".into(),
+                abbrev: "Day".into(),
+            }),
+            window_start: None,
+            window_end: None,
+            status: LaunchStatus {
+                id: status_id,
+                name: "Status".into(),
+                abbrev: status_abbrev.into(),
+            },
+            launch_service_provider: Provider {
+                name: "SpaceX".into(),
+                provider_type: None,
+            },
+            pad: PadInfo {
+                name: None,
+                location: LocationInfo {
+                    name: "KSC, Florida".into(),
+                    timezone_name: Some("America/New_York".into()),
+                    country: None,
+                },
+            },
+            mission: None,
+        }
+    }
+
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn render_empty_list_shows_no_launches_message() {
+        let mut terminal = make_test_terminal(100, 30);
+        let app = App::new((100, 30));
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("No launches to display"),
+            "empty list should show 'No launches' message, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_loading_empty_list_shows_fetching_message() {
+        let mut terminal = make_test_terminal(100, 30);
+        let mut app = App::new((100, 30));
+        app.loading = true;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Fetching launches"),
+            "loading empty list should show 'Fetching launches' message, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_shows_status_badge_text() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Falcon 9 • Starlink", 1, "Go")];
+        app.total_count = 1;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("[Go]"),
+            "list should render status badge [Go], got:\n{text}"
+        );
+        assert!(
+            text.contains("Falcon 9"),
+            "list should render launch name, got:\n{text}"
+        );
+        assert!(
+            text.contains("SpaceX"),
+            "list should render provider name, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_shows_tbd_status_badge() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Ariane 6", 2, "TBD")];
+        app.total_count = 1;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("[TBD]"),
+            "list should render status badge [TBD], got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_shows_staleness_indicator_when_stale() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Test Launch", 1, "Go")];
+        app.total_count = 1;
+        // Set cache metadata to expired time.
+        app.cache_fetched_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+        app.cache_expires_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:30:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("stale"),
+            "hint bar should show 'stale' indicator when cache expired, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_shows_count() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![
+            sample_launch("Launch 1", 1, "Go"),
+            sample_launch("Launch 2", 2, "TBD"),
+        ];
+        app.total_count = 50;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Showing 2 of 50"),
+            "title should show 'Showing 2 of 50', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_with_unicode_launch_names() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        let mut launch = sample_launch("长征五号 CZ-5 • 嫦娥六号 🚀", 1, "Go");
+        launch.pad.location.name = "文昌航天发射场, 海南".into();
+        launch.launch_service_provider.name = "中国航天科技集团".into();
+        app.launches = vec![launch];
+        app.total_count = 1;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("长征五号") || text.contains("CZ-5"),
+            "unicode launch name should render, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_shows_filtered_indicator() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 1;
+        app.filter_state.status = crate::tui::filter::StatusFilter::GoForLaunch;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("[Filtered]"),
+            "title should show [Filtered] when filters active, got:\n{text}"
+        );
+    }
 }

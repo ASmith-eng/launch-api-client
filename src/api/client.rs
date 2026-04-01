@@ -833,6 +833,112 @@ mod tests {
         }
     }
 
+    // --- Timeout tests ---
+
+    #[tokio::test]
+    async fn timeout_returns_retryable_offline_error() {
+        let server = MockServer::start().await;
+        let clock = FakeClock::new(base_time());
+        let limiter = RateLimiter::new(clock, false);
+
+        // Build a client with a very short timeout (100ms).
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let client = Ll2Client {
+            http,
+            base_url: server.uri(),
+            api_key: None,
+            rate_limiter: Mutex::new(limiter),
+        };
+
+        // Respond with a 5-second delay — exceeds our 100ms timeout.
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_LIST_RESPONSE, "application/json")
+                    .set_delay(Duration::from_secs(5)),
+            )
+            .mount(&server)
+            .await;
+
+        let result = client.fetch_launch_list(&ListParams::default()).await;
+        let err = result.unwrap_err();
+
+        // Timeout is both retryable and an offline signal.
+        assert!(err.is_retryable(), "timeout should be retryable");
+        assert!(err.is_offline_signal(), "timeout should be offline signal");
+    }
+
+    // --- Empty response tests ---
+
+    #[tokio::test]
+    async fn fetch_launch_list_empty_results() {
+        let (client, server) = setup().await;
+
+        let empty_response = r#"{
+            "count": 0,
+            "next": null,
+            "previous": null,
+            "results": []
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(empty_response, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = client
+            .fetch_launch_list(&ListParams::default())
+            .await
+            .expect("empty list should parse successfully");
+
+        assert_eq!(result.total_count, 0);
+        assert!(result.launches.is_empty());
+    }
+
+    // --- Query parameter tests ---
+
+    #[tokio::test]
+    async fn filter_params_appear_in_request() {
+        let (client, server) = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/launches/upcoming/"))
+            .and(query_param("status__ids", "1,2"))
+            .and(query_param("is_crewed", "true"))
+            .and(query_param("pad__location", "27,12"))
+            .and(query_param("limit", "10"))
+            .and(query_param("offset", "5"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let params = ListParams {
+            limit: 10,
+            offset: 5,
+            status_ids: Some("1,2".into()),
+            is_crewed: Some(true),
+            pad_location: Some("27,12".into()),
+            net_gt: None,
+            net_lt: None,
+            search: None,
+        };
+
+        // If any query param doesn't match, wiremock returns 404.
+        let result = client.fetch_launch_list(&params).await;
+        assert!(result.is_ok(), "query params should match wiremock expectations");
+    }
+
     // --- Startup throttle sync tests ---
 
     #[tokio::test]
