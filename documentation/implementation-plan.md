@@ -1017,7 +1017,7 @@ clippy clean (only pre-existing dead-code warnings from later-phase items).
 
 ## Phase 8: Shutdown, Edge Cases & Testing
 
-### Step 8.1 — Graceful shutdown and state persistence
+### Step 8.1 — Graceful shutdown and state persistence ✅
 
 Ensure clean exit and state saving.
 
@@ -1031,6 +1031,17 @@ Ensure clean exit and state saving.
 **Acceptance criteria:** Quitting with `q` saves state and restores terminal.
 Killing with Ctrl+C restores terminal via `TerminalGuard::drop`. Panic
 restores terminal. Rate limit data persists across sessions.
+
+**Completed.** Most shutdown infrastructure was already in place from earlier
+phases. The remaining gap — OS-level SIGINT handling — was added:
+- `src/tui/event.rs` — `tokio::signal::ctrl_c()` as a `biased` branch in
+  the `tokio::select!` loop, ensuring graceful shutdown even when crossterm's
+  event stream doesn't deliver Ctrl+C as a key event (e.g., during long API
+  calls). Sets `should_quit = true` so the normal exit path runs (state save,
+  `TerminalGuard` drop).
+- Previously completed: `app_state.json` persistence (main.rs), rate limit
+  state save/restore, `TerminalGuard` RAII + panic hook (terminal.rs),
+  Ctrl+C key event handler (keys.rs).
 
 ---
 

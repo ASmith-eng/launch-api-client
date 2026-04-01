@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
+use tokio::signal;
 use tracing::debug;
 
 use crate::api::client::Ll2Client;
@@ -51,6 +52,8 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
 ) -> Result<(), AppError> {
     let mut reader = EventStream::new();
     let mut pending: Option<Pin<Box<dyn Future<Output = FetchResult> + Send>>> = None;
+    let ctrl_c = signal::ctrl_c();
+    tokio::pin!(ctrl_c);
 
     loop {
         // Auto-dismiss transient errors.
@@ -75,9 +78,17 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
         // Render.
         render(terminal, app)?;
 
-        // Multiplex input events and pending API calls.
+        // Multiplex input events, OS signals, and pending API calls.
         tokio::select! {
             biased;
+
+            // OS-level SIGINT — crossterm may not deliver Ctrl+C as a key
+            // event during long operations. This branch ensures graceful
+            // shutdown with state persistence regardless.
+            _ = &mut ctrl_c => {
+                debug!("received SIGINT, shutting down");
+                app.should_quit = true;
+            }
 
             maybe_event = reader.next() => {
                 match maybe_event {
