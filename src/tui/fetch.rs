@@ -199,6 +199,7 @@ pub fn spawn_fetch<C: Clock + Send + Sync + 'static>(
         FetchKind::LaunchList => {
             let mut params = ListParams {
                 limit: app.launches_per_page,
+                offset: app.page_offset(),
                 ..Default::default()
             };
             app.filter_state.apply_to_params(&mut params, Utc::now());

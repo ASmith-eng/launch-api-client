@@ -47,6 +47,24 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
                 app.refresh_requested = true;
             }
         }
+        KeyCode::Char('n') => {
+            // Next page — only if not on the last page and not loading.
+            if !app.loading && app.current_page + 1 < app.total_pages() {
+                app.current_page += 1;
+                app.launches.clear();
+                app.selected_index = 0;
+                app.list_scroll_offset = 0;
+            }
+        }
+        KeyCode::Char('p') => {
+            // Previous page — only if not on the first page and not loading.
+            if !app.loading && app.current_page > 0 {
+                app.current_page -= 1;
+                app.launches.clear();
+                app.selected_index = 0;
+                app.list_scroll_offset = 0;
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             if app.selected_index > 0 {
                 app.selected_index -= 1;
@@ -137,6 +155,7 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
                 app.launches.clear();
                 app.selected_index = 0;
                 app.list_scroll_offset = 0;
+                app.current_page = 0;
                 app.total_count = 0;
                 app.cache_fetched_at = None;
                 app.cache_expires_at = None;
@@ -160,5 +179,152 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('q') => app.should_quit = true,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn sample_launch(id: &str) -> crate::models::LaunchSummary {
+        use crate::models::*;
+        use chrono::Utc;
+        LaunchSummary {
+            id: id.to_string(),
+            name: "Test".into(),
+            net: Utc::now(),
+            net_precision: None,
+            window_start: None,
+            window_end: None,
+            status: LaunchStatus { id: 1, name: "Go".into(), abbrev: "Go".into() },
+            launch_service_provider: Provider { name: "SpaceX".into(), provider_type: None },
+            pad: PadInfo {
+                name: None,
+                location: LocationInfo {
+                    name: "KSC".into(),
+                    timezone_name: None,
+                    country: None,
+                },
+            },
+            mission: None,
+        }
+    }
+
+    // --- Pagination key tests ---
+
+    #[test]
+    fn next_page_advances_and_clears_launches() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50; // 2 pages at 25 per page
+        app.selected_index = 5;
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1);
+        assert!(app.launches.is_empty());
+        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.list_scroll_offset, 0);
+    }
+
+    #[test]
+    fn next_page_noop_on_last_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 1; // last page (50/25 = 2 pages, 0-indexed: 0 and 1)
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1); // unchanged
+        assert!(!app.launches.is_empty()); // not cleared
+    }
+
+    #[test]
+    fn prev_page_goes_back_and_clears_launches() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 75;
+        app.current_page = 2;
+        app.selected_index = 3;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+        assert!(app.launches.is_empty());
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn prev_page_noop_on_first_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 0);
+        assert!(!app.launches.is_empty());
+    }
+
+    #[test]
+    fn next_page_noop_when_loading() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 0;
+        app.loading = true;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn prev_page_noop_when_loading() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 1;
+        app.loading = true;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+    }
+
+    #[test]
+    fn next_page_noop_single_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 10; // 10 < 25, only 1 page
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn filter_apply_resets_page() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        app.editing_filter = Some(crate::tui::filter::FilterState::default());
+        app.current_page = 3;
+
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(app.current_page, 0);
     }
 }

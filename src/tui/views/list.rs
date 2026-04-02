@@ -50,7 +50,7 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     render_hint_bar(frame, hint_area, app);
 }
 
-/// Build the title string: "Launches — Showing N of M" with optional rate limit.
+/// Build the title string: "Launches — Showing N of M — Page X of Y" with optional rate limit.
 fn build_title(app: &App) -> String {
     let filtered = if app.filter_state.has_active_filters() {
         " [Filtered]"
@@ -60,8 +60,13 @@ fn build_title(app: &App) -> String {
     let left = if app.loading {
         " Fetching launches... ".to_string()
     } else {
+        let page_info = if app.total_pages() > 1 {
+            format!(" — Page {} of {}", app.current_page + 1, app.total_pages())
+        } else {
+            String::new()
+        };
         format!(
-            " Launches{filtered} — Showing {} of {} ",
+            " Launches{filtered} — Showing {} of {}{page_info} ",
             app.launches.len(),
             app.total_count,
         )
@@ -203,11 +208,21 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let key = style::secondary();
     let desc = style::label();
 
-    let hints = Line::from(vec![
+    let mut spans = vec![
         Span::styled("  ↑/↓", key),
         Span::styled(": Navigate · ", desc),
         Span::styled("Enter", key),
         Span::styled(": Details · ", desc),
+    ];
+
+    if app.total_pages() > 1 {
+        spans.extend([
+            Span::styled("n/p", key),
+            Span::styled(": Page · ", desc),
+        ]);
+    }
+
+    spans.extend([
         Span::styled("f", key),
         Span::styled(": Filters · ", desc),
         Span::styled("r", key),
@@ -217,6 +232,8 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         Span::styled("q", key),
         Span::styled(": Quit", desc),
     ]);
+
+    let hints = Line::from(spans);
 
     let paragraph = Paragraph::new(vec![status_line, hints]);
     frame.render_widget(paragraph, area);
@@ -552,6 +569,91 @@ mod tests {
         assert!(
             text.contains("长征五号") || text.contains("CZ-5"),
             "unicode launch name should render, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_shows_page_indicator() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 75;
+        app.launches_per_page = 25;
+        app.current_page = 1; // page 2 of 3
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Page 2 of 3"),
+            "title should show page indicator 'Page 2 of 3', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_hides_page_indicator_single_page() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 10;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            !text.contains("Page"),
+            "title should not show page indicator for single page, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_hint_bar_shows_page_nav_when_multipage() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 50;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("n/p"),
+            "hint bar should show 'n/p' for multi-page results, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_hint_bar_hides_page_nav_single_page() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 10;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            !text.contains("n/p"),
+            "hint bar should not show 'n/p' for single page, got:\n{text}"
         );
     }
 
