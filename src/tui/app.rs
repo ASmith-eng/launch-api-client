@@ -124,7 +124,7 @@ impl App {
         if self.total_count == 0 || self.launches_per_page == 0 {
             return 1;
         }
-        (self.total_count + self.launches_per_page - 1) / self.launches_per_page
+        self.total_count.div_ceil(self.launches_per_page)
     }
 
     /// API offset for the current page.

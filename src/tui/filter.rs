@@ -68,8 +68,8 @@ pub enum StatusFilter {
     #[default]
     All,
     GoForLaunch,
-    TBD,
-    TBC,
+    Tbd,
+    Tbc,
     OnHold,
     InFlight,
 }
@@ -79,8 +79,8 @@ impl FilterOption for StatusFilter {
         &[
             Self::All,
             Self::GoForLaunch,
-            Self::TBD,
-            Self::TBC,
+            Self::Tbd,
+            Self::Tbc,
             Self::OnHold,
             Self::InFlight,
         ]
@@ -90,8 +90,8 @@ impl FilterOption for StatusFilter {
         match self {
             Self::All => "All",
             Self::GoForLaunch => "Go for Launch",
-            Self::TBD => "TBD",
-            Self::TBC => "TBC",
+            Self::Tbd => "TBD",
+            Self::Tbc => "TBC",
             Self::OnHold => "On Hold",
             Self::InFlight => "In Flight",
         }
@@ -104,8 +104,8 @@ impl StatusFilter {
         match self {
             Self::All => None,
             Self::GoForLaunch => Some("1".into()),
-            Self::TBD => Some("2".into()),
-            Self::TBC => Some("8".into()),
+            Self::Tbd => Some("2".into()),
+            Self::Tbc => Some("8".into()),
             Self::OnHold => Some("5".into()),
             Self::InFlight => Some("6".into()),
         }
@@ -414,8 +414,8 @@ mod tests {
     fn status_filter_api_ids() {
         assert_eq!(StatusFilter::All.status_ids(), None);
         assert_eq!(StatusFilter::GoForLaunch.status_ids(), Some("1".into()));
-        assert_eq!(StatusFilter::TBD.status_ids(), Some("2".into()));
-        assert_eq!(StatusFilter::TBC.status_ids(), Some("8".into()));
+        assert_eq!(StatusFilter::Tbd.status_ids(), Some("2".into()));
+        assert_eq!(StatusFilter::Tbc.status_ids(), Some("8".into()));
         assert_eq!(StatusFilter::OnHold.status_ids(), Some("5".into()));
         assert_eq!(StatusFilter::InFlight.status_ids(), Some("6".into()));
     }

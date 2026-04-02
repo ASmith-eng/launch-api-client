@@ -27,7 +27,7 @@ pub struct Config {
 }
 
 /// API connection settings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct ApiConfig {
     /// Optional API key for higher rate limits (30/hr vs 15/hr).
@@ -85,13 +85,6 @@ pub struct LogConfig {
 // Defaults
 // ---------------------------------------------------------------------------
 
-impl Default for ApiConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-        }
-    }
-}
 
 impl Default for CacheConfig {
     fn default() -> Self {
