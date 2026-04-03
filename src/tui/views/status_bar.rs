@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
+use crate::config::StalenessStyle;
 use crate::tui::app::{App, AppScreen};
 use crate::tui::time_fmt;
 
@@ -105,7 +106,7 @@ fn build_fresh_line(
 ) -> Line<'static> {
     let dim = Style::default().fg(Color::DarkGray);
     let updated = staleness_text(app, fetched_at);
-    let refresh_time = time_fmt::format_time_of_day(&expires_at, &app.ui_config.time_format);
+    let refresh_time = time_fmt::format_time_of_day(&expires_at, app.ui_config.time_format);
 
     Line::from(Span::styled(
         format!("  {updated} • Next refresh after {refresh_time} UTC"),
@@ -121,12 +122,15 @@ fn staleness_text(
     app: &App,
     fetched_at: chrono::DateTime<chrono::Utc>,
 ) -> String {
-    if app.ui_config.staleness_style == "absolute" {
-        let time_str = time_fmt::format_time_of_day(&fetched_at, &app.ui_config.time_format);
-        format!("Last updated {time_str} UTC")
-    } else {
-        let relative = time_fmt::format_relative_time(fetched_at, Utc::now());
-        format!("Updated {relative}")
+    match app.ui_config.staleness_style {
+        StalenessStyle::Absolute => {
+            let time_str = time_fmt::format_time_of_day(&fetched_at, app.ui_config.time_format);
+            format!("Last updated {time_str} UTC")
+        }
+        StalenessStyle::Relative => {
+            let relative = time_fmt::format_relative_time(fetched_at, Utc::now());
+            format!("Updated {relative}")
+        }
     }
 }
 
@@ -134,6 +138,8 @@ fn staleness_text(
 mod tests {
     use super::*;
     use chrono::Duration;
+    use crate::cache::CacheStrategy;
+    use crate::config::TimeFormat;
     use crate::models::{LaunchDetailCache, CACHE_VERSION};
     use crate::models::tests::dummy_launch_detail;
     use crate::tui::app::App;
@@ -163,7 +169,7 @@ mod tests {
                 launch_id: launch_id.to_string(),
                 fetched_at: now - Duration::minutes(detail_fetched_ago_mins),
                 expires_at: now + Duration::minutes(detail_expires_in_mins),
-                ttl_strategy: "imminent".to_string(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: dummy_launch_detail(),
             },
         );
@@ -218,7 +224,7 @@ mod tests {
     #[test]
     fn status_line_stale_absolute() {
         let mut app = app_with_cache(120, -10);
-        app.ui_config.staleness_style = "absolute".into();
+        app.ui_config.staleness_style = StalenessStyle::Absolute;
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Last updated"));
@@ -241,7 +247,7 @@ mod tests {
     #[test]
     fn status_line_fresh_absolute() {
         let mut app = app_with_cache(5, 25);
-        app.ui_config.staleness_style = "absolute".into();
+        app.ui_config.staleness_style = StalenessStyle::Absolute;
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("Last updated"));
@@ -251,7 +257,7 @@ mod tests {
     #[test]
     fn status_line_fresh_24h_format() {
         let mut app = app_with_cache(5, 25);
-        app.ui_config.time_format = "24h".into();
+        app.ui_config.time_format = TimeFormat::TwentyFourHour;
         let line = build_status_line(&app);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         // 24h format should NOT contain AM/PM

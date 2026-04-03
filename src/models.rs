@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::cache::CacheStrategy;
+
 /// Summary of a launch for use in the list view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchSummary {
@@ -150,7 +152,7 @@ pub struct LaunchDetailCache {
     pub launch_id: String,
     pub fetched_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub ttl_strategy: String,
+    pub ttl_strategy: CacheStrategy,
     pub data: LaunchDetail,
 }
 
@@ -276,13 +278,13 @@ pub(crate) mod tests {
             launch_id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
             fetched_at: "2026-02-22T10:20:00Z".parse().unwrap(),
             expires_at: "2026-02-22T10:25:00Z".parse().unwrap(),
-            ttl_strategy: "imminent".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         };
 
         assert_eq!(cache.version, 1);
         assert_eq!(cache.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
-        assert_eq!(cache.ttl_strategy, "imminent");
+        assert_eq!(cache.ttl_strategy, CacheStrategy::ShortTerm);
         assert_eq!(cache.data.name, "Starship IFT-7");
 
         let serialized = serde_json::to_string(&cache).unwrap();

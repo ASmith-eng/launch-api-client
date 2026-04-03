@@ -44,8 +44,9 @@ pub fn init_logging(config_dir: &Path, config: &LogConfig) -> Result<(), String>
         .open(&log_path)
         .map_err(|e| format!("failed to open log file {}: {e}", log_path.display()))?;
 
-    let filter = EnvFilter::try_new(&config.level)
-        .map_err(|e| format!("invalid log level '{}': {e}", config.level))?;
+    let level_str = config.level.to_string();
+    let filter = EnvFilter::try_new(&level_str)
+        .map_err(|e| format!("invalid log level '{}': {e}", level_str))?;
 
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)

@@ -1231,15 +1231,6 @@ Items identified during design review. Resolved items marked with ✅.
    option that maps to all location IDs not covered by the named regions,
    or add more specific region entries.
 
-8. **Visual indicator for background data refresh**
-   When cached data is already displayed (list or detail view) and a
-   refresh fetch is in progress, the update happens silently — the status
-   bar shows "Refreshing..." but the stale content remains on screen with
-   no transient visual cue when it is replaced. Consider adding a
-   lightweight indicator (e.g. a brief flash, a "Data updated" toast, or a
-   spinner overlay) so the user can tell that the displayed data has been
-   refreshed without needing to watch the status bar.
-
 ---
 
 ## Notes for AI Agent Sessions

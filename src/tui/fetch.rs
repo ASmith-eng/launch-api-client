@@ -315,7 +315,7 @@ pub fn handle_fetch_result<C: Clock>(
                 launch_id: launch_id.clone(),
                 fetched_at: now,
                 expires_at,
-                ttl_strategy: strategy.as_str().to_string(),
+                ttl_strategy: strategy,
                 data: *detail,
             };
 
@@ -560,7 +560,6 @@ mod tests {
         assert!(app.detail_cache.contains_key(&launch_id));
         let cached = &app.detail_cache[&launch_id];
         assert_eq!(cached.data.name, "Starship IFT-7");
-        assert!(!cached.ttl_strategy.is_empty());
     }
 
     #[test]
@@ -742,7 +741,7 @@ mod tests {
                 launch_id: "some-uuid".into(),
                 fetched_at: Utc::now(),
                 expires_at: Utc::now() + Duration::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: dummy_launch_detail(),
             },
         );
@@ -760,7 +759,7 @@ mod tests {
                 launch_id: "some-uuid".into(),
                 fetched_at: Utc::now() - Duration::hours(2),
                 expires_at: Utc::now() - Duration::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: dummy_launch_detail(),
             },
         );
@@ -814,7 +813,7 @@ mod tests {
                 launch_id: "some-uuid".into(),
                 fetched_at: Utc::now() - Duration::hours(2),
                 expires_at: Utc::now() - Duration::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: dummy_launch_detail(),
             },
         );

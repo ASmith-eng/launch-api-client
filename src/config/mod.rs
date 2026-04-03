@@ -5,13 +5,59 @@
 //! Missing keys keep their defaults; invalid values fall back to defaults with
 //! a warning logged.
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::error::AppError;
+
+// ---------------------------------------------------------------------------
+// Strong types for config values
+// ---------------------------------------------------------------------------
+
+/// Time display format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeFormat {
+    #[serde(rename = "12h")]
+    TwelveHour,
+    #[serde(rename = "24h")]
+    TwentyFourHour,
+}
+
+/// Staleness display style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StalenessStyle {
+    Relative,
+    Absolute,
+}
+
+/// Log level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+        };
+        f.write_str(s)
+    }
+}
 
 /// Top-level application configuration.
 ///
@@ -63,10 +109,10 @@ pub struct CacheConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
-    /// Time format: "12h" or "24h".
-    pub time_format: String,
-    /// Staleness display: "relative" or "absolute".
-    pub staleness_style: String,
+    /// Time format: `12h` or `24h`.
+    pub time_format: TimeFormat,
+    /// Staleness display: `relative` or `absolute`.
+    pub staleness_style: StalenessStyle,
     /// Number of launches per page.
     pub launches_per_page: u32,
 }
@@ -75,8 +121,8 @@ pub struct UiConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct LogConfig {
-    /// Log level: "error", "warn", "info", "debug", "trace".
-    pub level: String,
+    /// Log level.
+    pub level: LogLevel,
     /// Log file name (stored in config_dir).
     pub file: String,
 }
@@ -104,8 +150,8 @@ impl Default for CacheConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            time_format: "12h".into(),
-            staleness_style: "relative".into(),
+            time_format: TimeFormat::TwelveHour,
+            staleness_style: StalenessStyle::Relative,
             launches_per_page: 25,
         }
     }
@@ -114,7 +160,7 @@ impl Default for UiConfig {
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
-            level: "warn".into(),
+            level: LogLevel::Warn,
             file: "app.log".into(),
         }
     }
@@ -124,9 +170,6 @@ impl Default for LogConfig {
 // Sanitisation
 // ---------------------------------------------------------------------------
 
-const VALID_TIME_FORMATS: &[&str] = &["12h", "24h"];
-const VALID_STALENESS_STYLES: &[&str] = &["relative", "absolute"];
-const VALID_LOG_LEVELS: &[&str] = &["error", "warn", "info", "debug", "trace"];
 const MAX_LAUNCHES_PER_PAGE: u32 = 100;
 /// 30 days in minutes — upper bound for all TTL fields.
 const MAX_TTL_MINUTES: u64 = 43_200;
@@ -185,22 +228,6 @@ impl UiConfig {
     fn sanitize(&mut self) {
         let defaults = Self::default();
 
-        if !VALID_TIME_FORMATS.contains(&self.time_format.as_str()) {
-            warn!(
-                value = %self.time_format,
-                "Invalid time_format (expected 12h or 24h), using default"
-            );
-            self.time_format = defaults.time_format;
-        }
-
-        if !VALID_STALENESS_STYLES.contains(&self.staleness_style.as_str()) {
-            warn!(
-                value = %self.staleness_style,
-                "Invalid staleness_style (expected relative or absolute), using default"
-            );
-            self.staleness_style = defaults.staleness_style;
-        }
-
         if self.launches_per_page == 0 || self.launches_per_page > MAX_LAUNCHES_PER_PAGE {
             warn!(
                 value = self.launches_per_page,
@@ -215,14 +242,6 @@ impl UiConfig {
 impl LogConfig {
     fn sanitize(&mut self) {
         let defaults = Self::default();
-
-        if !VALID_LOG_LEVELS.contains(&self.level.as_str()) {
-            warn!(
-                value = %self.level,
-                "Invalid log level, using default"
-            );
-            self.level = defaults.level;
-        }
 
         // Guard against path traversal in log file name
         if self.file.contains('/')
@@ -371,10 +390,10 @@ mod tests {
         assert_eq!(config.cache.max_detail_age_days, 30);
         assert_eq!(config.cache.max_detail_files, 100);
         assert_eq!(config.cache.prune_every_n_startups, 5);
-        assert_eq!(config.ui.time_format, "12h");
-        assert_eq!(config.ui.staleness_style, "relative");
+        assert_eq!(config.ui.time_format, TimeFormat::TwelveHour);
+        assert_eq!(config.ui.staleness_style, StalenessStyle::Relative);
         assert_eq!(config.ui.launches_per_page, 25);
-        assert_eq!(config.log.level, "warn");
+        assert_eq!(config.log.level, LogLevel::Warn);
         assert_eq!(config.log.file, "app.log");
     }
 
@@ -384,7 +403,7 @@ mod tests {
         let path = dir.path().join("nonexistent.toml");
         let config = load_config(&path);
         assert_eq!(config.cache.ttl_far_future, 1440);
-        assert_eq!(config.log.level, "warn");
+        assert_eq!(config.log.level, LogLevel::Warn);
     }
 
     #[test]
@@ -416,9 +435,9 @@ level = "debug"
         // Unset keys keep defaults
         assert_eq!(config.cache.ttl_near_future, 180);
         assert_eq!(config.cache.ttl_imminent, 30);
-        assert_eq!(config.ui.time_format, "24h");
+        assert_eq!(config.ui.time_format, TimeFormat::TwentyFourHour);
         assert_eq!(config.ui.launches_per_page, 50);
-        assert_eq!(config.log.level, "debug");
+        assert_eq!(config.log.level, LogLevel::Debug);
         // Unset log.file keeps default
         assert_eq!(config.log.file, "app.log");
     }
@@ -438,11 +457,11 @@ time_format = "24h"
 
         let config = load_config(&path);
         // Overridden
-        assert_eq!(config.ui.time_format, "24h");
+        assert_eq!(config.ui.time_format, TimeFormat::TwentyFourHour);
         // Everything else is defaults
         assert!(config.api.api_key.is_empty());
         assert_eq!(config.cache.ttl_far_future, 1440);
-        assert_eq!(config.log.level, "warn");
+        assert_eq!(config.log.level, LogLevel::Warn);
         assert_eq!(config.ui.launches_per_page, 25);
     }
 
@@ -454,7 +473,7 @@ time_format = "24h"
 
         let config = load_config(&path);
         assert_eq!(config.cache.ttl_far_future, 1440);
-        assert_eq!(config.log.level, "warn");
+        assert_eq!(config.log.level, LogLevel::Warn);
     }
 
     #[test]
@@ -625,9 +644,10 @@ ttl_active = 2
     }
 
     #[test]
-    fn sanitize_invalid_time_format_reset_to_default() {
+    fn invalid_enum_values_fall_back_to_full_defaults() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
+        // Invalid enum values cause a TOML parse failure → full defaults.
         fs::write(
             &path,
             r#"
@@ -639,8 +659,8 @@ staleness_style = "funky"
         .unwrap();
 
         let config = load_config(&path);
-        assert_eq!(config.ui.time_format, "12h");
-        assert_eq!(config.ui.staleness_style, "relative");
+        assert_eq!(config.ui.time_format, TimeFormat::TwelveHour);
+        assert_eq!(config.ui.staleness_style, StalenessStyle::Relative);
     }
 
     #[test]
@@ -678,9 +698,10 @@ launches_per_page = 500
     }
 
     #[test]
-    fn sanitize_invalid_log_level_reset_to_default() {
+    fn invalid_log_level_falls_back_to_full_defaults() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
+        // Invalid enum value causes a TOML parse failure → full defaults.
         fs::write(
             &path,
             r#"
@@ -691,7 +712,7 @@ level = "verbose"
         .unwrap();
 
         let config = load_config(&path);
-        assert_eq!(config.log.level, "warn");
+        assert_eq!(config.log.level, LogLevel::Warn);
     }
 
     #[test]
@@ -760,7 +781,7 @@ file = "my-app.log"
         .unwrap();
 
         let config = load_config(&path);
-        assert_eq!(config.log.level, "debug");
+        assert_eq!(config.log.level, LogLevel::Debug);
         assert_eq!(config.log.file, "my-app.log");
     }
 

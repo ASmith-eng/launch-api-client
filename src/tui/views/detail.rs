@@ -660,6 +660,7 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::CacheStrategy;
     use crate::models::tests::dummy_launch_detail;
     use crate::models::{
         LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Provider, UrlEntry,
@@ -1127,7 +1128,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );
@@ -1160,7 +1161,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );
@@ -1192,7 +1193,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );

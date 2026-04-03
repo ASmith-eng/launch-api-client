@@ -12,7 +12,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::clock::Clock;
@@ -25,7 +25,8 @@ use crate::models::{AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION}
 // ---------------------------------------------------------------------------
 
 /// Cache TTL tier determined by launch status and proximity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CacheStrategy {
     /// Past launches (status 3, 4, 7) — data is final, never expires.
     Permanent,
@@ -79,16 +80,6 @@ impl CacheStrategy {
         }
     }
 
-    /// Human-readable name stored in `LaunchDetailCache.ttl_strategy`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Permanent => "permanent",
-            Self::LongTerm => "long_term",
-            Self::MediumTerm => "medium_term",
-            Self::ShortTerm => "short_term",
-            Self::RealTime => "real_time",
-        }
-    }
 }
 
 /// Compute the `expires_at` timestamp for a given strategy.
@@ -453,7 +444,7 @@ mod tests {
             launch_id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(30),
-            ttl_strategy: "short_term".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         }
     }
@@ -510,7 +501,7 @@ mod tests {
 
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
-        assert_eq!(loaded.ttl_strategy, "short_term");
+        assert_eq!(loaded.ttl_strategy, CacheStrategy::ShortTerm);
         assert_eq!(loaded.data.name, "Starship IFT-7");
     }
 
@@ -955,7 +946,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
-            ttl_strategy: "real_time".into(),
+            ttl_strategy: CacheStrategy::RealTime,
             data: dummy_launch_detail(),
         };
         assert!(!detail.is_stale(now + TimeDelta::seconds(59)));
@@ -969,7 +960,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
-            ttl_strategy: "real_time".into(),
+            ttl_strategy: CacheStrategy::RealTime,
             data: dummy_launch_detail(),
         };
         assert!(detail.is_stale(now + TimeDelta::minutes(1)));
@@ -983,7 +974,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: DateTime::<Utc>::MAX_UTC,
-            ttl_strategy: "permanent".into(),
+            ttl_strategy: CacheStrategy::Permanent,
             data: dummy_launch_detail(),
         };
         // Even far in the future, permanent cache is never stale
@@ -1011,7 +1002,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: expires,
-            ttl_strategy: strategy.as_str().into(),
+            ttl_strategy: strategy,
             data: dummy_launch_detail(),
         };
 
@@ -1037,7 +1028,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: expires,
-            ttl_strategy: strategy.as_str().into(),
+            ttl_strategy: strategy,
             data: dummy_launch_detail(),
         };
 
@@ -1074,16 +1065,23 @@ mod tests {
     }
 
     // =====================================================================
-    // CacheStrategy::as_str tests
+    // CacheStrategy serde tests
     // =====================================================================
 
     #[test]
-    fn strategy_as_str() {
-        assert_eq!(CacheStrategy::Permanent.as_str(), "permanent");
-        assert_eq!(CacheStrategy::LongTerm.as_str(), "long_term");
-        assert_eq!(CacheStrategy::MediumTerm.as_str(), "medium_term");
-        assert_eq!(CacheStrategy::ShortTerm.as_str(), "short_term");
-        assert_eq!(CacheStrategy::RealTime.as_str(), "real_time");
+    fn strategy_serde_round_trip() {
+        for (strategy, expected_str) in [
+            (CacheStrategy::Permanent, "\"permanent\""),
+            (CacheStrategy::LongTerm, "\"long_term\""),
+            (CacheStrategy::MediumTerm, "\"medium_term\""),
+            (CacheStrategy::ShortTerm, "\"short_term\""),
+            (CacheStrategy::RealTime, "\"real_time\""),
+        ] {
+            let json = serde_json::to_string(&strategy).unwrap();
+            assert_eq!(json, expected_str);
+            let deserialized: CacheStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, strategy);
+        }
     }
 
     // =====================================================================
@@ -1097,7 +1095,7 @@ mod tests {
             launch_id: id.into(),
             fetched_at,
             expires_at: fetched_at + TimeDelta::hours(1),
-            ttl_strategy: "long_term".into(),
+            ttl_strategy: CacheStrategy::LongTerm,
             data: dummy_launch_detail(),
         };
         mgr.save_launch_detail(&detail).unwrap();
@@ -1357,7 +1355,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(5),
-            ttl_strategy: "short_term".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         };
         // Clock jumps backward — detail should not be considered stale.
