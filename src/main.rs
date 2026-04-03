@@ -160,7 +160,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Populate rate limit display from current limiter state.
     {
-        let mut limiter = api_client.rate_limiter();
+        let mut limiter = api_client.rate_limiter().await;
         app.rate_limit_remaining = Some(limiter.remaining() as u32);
         app.rate_limit_total = Some(limiter.limit() as u32);
     }
@@ -185,7 +185,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // 9. Save app state on exit, including current rate limit state.
     {
-        let limiter = api_client.rate_limiter();
+        let limiter = api_client.rate_limiter().await;
         app_state.rate_limit = limiter.to_state();
     }
     app_state.last_startup = Utc::now();

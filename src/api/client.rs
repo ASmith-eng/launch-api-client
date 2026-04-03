@@ -5,8 +5,9 @@
 //! integrated client-side rate limiting.
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use tokio::sync::Mutex;
 
 use tracing::{debug, error, info, warn};
 
@@ -90,16 +91,13 @@ impl<C: Clock> Ll2Client<C> {
     }
 
     /// Access the rate limiter for UI queries (remaining, limit) or persistence.
-    pub fn rate_limiter(&self) -> std::sync::MutexGuard<'_, RateLimiter<C>> {
-        self.rate_limiter.lock().expect("rate limiter lock poisoned")
+    pub async fn rate_limiter(&self) -> tokio::sync::MutexGuard<'_, RateLimiter<C>> {
+        self.rate_limiter.lock().await
     }
 
     /// Check rate limiter and record a request. Returns `Err` if rate limited.
-    fn check_and_record_request(&self) -> Result<(), AppError> {
-        self.rate_limiter
-            .lock()
-            .expect("rate limiter lock poisoned")
-            .record_request()
+    async fn check_and_record_request(&self) -> Result<(), AppError> {
+        self.rate_limiter.lock().await.record_request()
     }
 
     /// Build an HTTP request with the API key header if configured.
@@ -117,9 +115,9 @@ impl<C: Clock> Ll2Client<C> {
     ///
     /// Returns `Err` if the cap has been exceeded. This is a safety net —
     /// if this ever fires, there is a bug in the application-layer logic.
-    fn check_request_cap(&self) -> Result<(), AppError> {
+    async fn check_request_cap(&self) -> Result<(), AppError> {
         let now = Instant::now();
-        let mut log = self.request_log.lock().expect("request_log lock poisoned");
+        let mut log = self.request_log.lock().await;
 
         // Prune entries outside the rolling window.
         while let Some(&front) = log.front() {
@@ -149,7 +147,7 @@ impl<C: Clock> Ll2Client<C> {
 
     /// Send a request and map non-success status codes to `AppError`.
     async fn send_and_check(&self, url: &str) -> Result<reqwest::Response, AppError> {
-        self.check_request_cap()?;
+        self.check_request_cap().await?;
         debug!(url, "sending API request");
         let response = self.request(url).send().await?;
 
@@ -200,7 +198,7 @@ impl<C: Clock> Ll2Client<C> {
         // Best-effort sync — if it fails, fall back to local rate limit state.
         match self.fetch_throttle_raw().await {
             Ok(status) => {
-                let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+                let mut limiter = self.rate_limiter.lock().await;
                 limiter.record_sync(status.remaining, status.limit);
             }
             Err(e) => {
@@ -208,7 +206,7 @@ impl<C: Clock> Ll2Client<C> {
             }
         }
 
-        let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+        let mut limiter = self.rate_limiter.lock().await;
         let available_at = limiter.next_available_at();
         Err(AppError::RateLimited(available_at))
     }
@@ -240,19 +238,15 @@ impl<C: Clock> Ll2Client<C> {
     /// On permanent failure, logs a warning and returns the error — the caller
     /// should continue with local rate limit tracking.
     pub async fn sync_throttle_with_retry(&self) -> Result<ThrottleStatus, AppError> {
-        let apply_sync = |this: &Self, status: &ThrottleStatus| {
-            let mut limiter = this.rate_limiter.lock().expect("rate limiter lock poisoned");
-            limiter.record_sync(status.remaining, status.limit);
-            debug!(
-                remaining = status.remaining,
-                limit = status.limit,
-                "startup throttle sync complete"
-            );
-        };
-
         match self.fetch_throttle_raw().await {
             Ok(status) => {
-                apply_sync(self, &status);
+                let mut limiter = self.rate_limiter.lock().await;
+                limiter.record_sync(status.remaining, status.limit);
+                debug!(
+                    remaining = status.remaining,
+                    limit = status.limit,
+                    "startup throttle sync complete"
+                );
                 Ok(status)
             }
             Err(e) if e.is_retryable() => {
@@ -260,7 +254,13 @@ impl<C: Clock> Ll2Client<C> {
                 tokio::time::sleep(RETRY_DELAY).await;
                 match self.fetch_throttle_raw().await {
                     Ok(status) => {
-                        apply_sync(self, &status);
+                        let mut limiter = self.rate_limiter.lock().await;
+                        limiter.record_sync(status.remaining, status.limit);
+                        debug!(
+                            remaining = status.remaining,
+                            limit = status.limit,
+                            "startup throttle sync complete"
+                        );
                         Ok(status)
                     }
                     Err(e) => {
@@ -297,7 +297,7 @@ impl<C: Clock> Ll2Client<C> {
             "throttle sync complete"
         );
 
-        let mut limiter = self.rate_limiter.lock().expect("rate limiter lock poisoned");
+        let mut limiter = self.rate_limiter.lock().await;
         limiter.record_sync(status.remaining, status.limit);
 
         Ok(status)
@@ -309,7 +309,7 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         &self,
         params: &ListParams,
     ) -> Result<LaunchListResponse, AppError> {
-        self.check_and_record_request()?;
+        self.check_and_record_request().await?;
 
         let url = endpoints::launches_upcoming_url(&self.base_url, params);
         let response = self.send_with_retry(&url).await?;
@@ -339,7 +339,7 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
     }
 
     async fn fetch_launch_detail(&self, id: &str) -> Result<LaunchDetail, AppError> {
-        self.check_and_record_request()?;
+        self.check_and_record_request().await?;
 
         let url = endpoints::launch_detail_url(&self.base_url, id);
         let response = self.send_with_retry(&url).await?;
@@ -518,14 +518,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        assert_eq!(client.rate_limiter().remaining(), 15);
+        assert_eq!(client.rate_limiter().await.remaining(), 15);
 
         client
             .fetch_launch_list(&ListParams::default())
             .await
             .unwrap();
 
-        assert_eq!(client.rate_limiter().remaining(), 14);
+        assert_eq!(client.rate_limiter().await.remaining(), 14);
     }
 
     // --- Detail endpoint tests ---
@@ -606,14 +606,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let before = client.rate_limiter().remaining();
+        let before = client.rate_limiter().await.remaining();
         client.fetch_throttle_status().await.unwrap();
 
         // The throttle endpoint updates the rate limiter via record_sync,
         // but it should NOT record a request against the limit.
         // The server reports current_use=3, so remaining should be 12.
         assert_eq!(before, 15);
-        assert_eq!(client.rate_limiter().remaining(), 12);
+        assert_eq!(client.rate_limiter().await.remaining(), 12);
     }
 
     #[tokio::test]
@@ -629,7 +629,7 @@ mod tests {
         client.fetch_throttle_status().await.unwrap();
 
         // After sync, should_sync() should return false (just synced).
-        assert!(!client.rate_limiter().should_sync());
+        assert!(!client.rate_limiter().await.should_sync());
     }
 
     // --- Rate limiting tests ---
@@ -820,7 +820,7 @@ mod tests {
         // Server reports current_use=3, limit=15 → remaining=12.
         // But we also recorded 1 request via check_and_record_request before
         // the 429, and record_sync reconciles to server state.
-        assert_eq!(client.rate_limiter().remaining(), 12);
+        assert_eq!(client.rate_limiter().await.remaining(), 12);
     }
 
     #[tokio::test]
@@ -1023,7 +1023,7 @@ mod tests {
         assert_eq!(status.limit, 15);
 
         // Rate limiter should be updated.
-        assert_eq!(client.rate_limiter().remaining(), 12);
+        assert_eq!(client.rate_limiter().await.remaining(), 12);
     }
 
     #[tokio::test]
@@ -1044,7 +1044,7 @@ mod tests {
         assert!(result.is_err());
 
         // Rate limiter should still work with local defaults.
-        assert_eq!(client.rate_limiter().remaining(), 15);
+        assert_eq!(client.rate_limiter().await.remaining(), 15);
     }
 
     #[tokio::test]
@@ -1067,33 +1067,33 @@ mod tests {
 
     // --- Transport-layer request cap tests ---
 
-    #[test]
-    fn request_cap_allows_requests_under_limit() {
+    #[tokio::test]
+    async fn request_cap_allows_requests_under_limit() {
         let clock = FakeClock::new(base_time());
         let limiter = RateLimiter::new(clock, false);
         let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
 
         for i in 0..REQUEST_CAP {
             assert!(
-                client.check_request_cap().is_ok(),
+                client.check_request_cap().await.is_ok(),
                 "request {i} should be allowed"
             );
         }
     }
 
-    #[test]
-    fn request_cap_blocks_at_limit() {
+    #[tokio::test]
+    async fn request_cap_blocks_at_limit() {
         let clock = FakeClock::new(base_time());
         let limiter = RateLimiter::new(clock, false);
         let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
 
         // Fill up to the cap.
         for _ in 0..REQUEST_CAP {
-            client.check_request_cap().unwrap();
+            client.check_request_cap().await.unwrap();
         }
 
         // Next request should be blocked.
-        let result = client.check_request_cap();
+        let result = client.check_request_cap().await;
         assert!(result.is_err(), "request at cap should be blocked");
 
         match result.unwrap_err() {
@@ -1107,15 +1107,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn request_cap_prunes_expired_entries() {
+    #[tokio::test]
+    async fn request_cap_prunes_expired_entries() {
         let clock = FakeClock::new(base_time());
         let limiter = RateLimiter::new(clock, false);
         let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
 
         // Backdate entries to just outside the window.
         {
-            let mut log = client.request_log.lock().unwrap();
+            let mut log = client.request_log.lock().await;
             let past = Instant::now() - REQUEST_CAP_WINDOW - Duration::from_secs(1);
             for _ in 0..REQUEST_CAP {
                 log.push_back(past);
@@ -1124,7 +1124,7 @@ mod tests {
 
         // Despite the log being full, all entries are expired — should succeed.
         assert!(
-            client.check_request_cap().is_ok(),
+            client.check_request_cap().await.is_ok(),
             "expired entries should be pruned, allowing new requests"
         );
     }

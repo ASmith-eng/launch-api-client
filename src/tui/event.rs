@@ -73,7 +73,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
         // State-driven fetch dispatch: check if the current screen needs data.
         // Proactive throttle sync takes priority (cheap, keeps rate limit accurate).
         if pending.is_none() {
-            if let Some(kind) = check_needs_throttle_sync(app, &client) {
+            if let Some(kind) = check_needs_throttle_sync(app, &client).await {
                 pending = Some(spawn_fetch(kind, &client, app));
             } else if let Some(kind) = check_needs_fetch(app) {
                 app.refresh_requested = false;

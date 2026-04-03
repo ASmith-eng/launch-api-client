@@ -67,11 +67,11 @@ pub enum FetchResult {
 /// Returns `Some(ThrottleSync)` when the rate limiter's `should_sync()`
 /// triggers (remaining <= 2, never synced, or >1 hour since last sync).
 /// Only fires when no fetch is in progress and the app isn't in an error state.
-pub fn check_needs_throttle_sync<C: Clock>(app: &App, client: &Ll2Client<C>) -> Option<FetchKind> {
+pub async fn check_needs_throttle_sync<C: Clock>(app: &App, client: &Ll2Client<C>) -> Option<FetchKind> {
     if app.loading || app.error_state.is_some() {
         return None;
     }
-    if client.rate_limiter().should_sync() {
+    if client.rate_limiter().await.should_sync() {
         debug!("proactive throttle sync needed");
         Some(FetchKind::ThrottleSync)
     } else {
@@ -366,7 +366,7 @@ pub async fn handle_fetch_result<C: Clock>(
     }
 
     // Update rate limit display from current limiter state.
-    let mut limiter = client.rate_limiter();
+    let mut limiter = client.rate_limiter().await;
     app.rate_limit_remaining = Some(limiter.remaining() as u32);
     app.rate_limit_total = Some(limiter.limit() as u32);
 }
