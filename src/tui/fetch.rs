@@ -170,10 +170,10 @@ fn active_screen(screen: &AppScreen) -> &AppScreen {
 }
 
 /// If we're on a detail screen without in-memory data, try loading from disk.
-pub fn maybe_load_detail_from_disk<C: Clock>(app: &mut App, cache_manager: &CacheManager<C>) {
+pub async fn maybe_load_detail_from_disk<C: Clock>(app: &mut App, cache_manager: &CacheManager<C>) {
     if let AppScreen::Detail(id) = active_screen(&app.screen) {
         if !app.detail_cache.contains_key(id) {
-            match cache_manager.load_launch_detail(id) {
+            match cache_manager.load_launch_detail(id).await {
                 Ok(Some(cached)) => {
                     debug!(launch_id = %id, "loaded detail from disk cache");
                     app.detail_cache.insert(id.clone(), cached);
@@ -262,7 +262,7 @@ async fn fetch_launch_detail<C: Clock + Send + Sync + 'static>(
 // ---------------------------------------------------------------------------
 
 /// Handle the result of a completed fetch.
-pub fn handle_fetch_result<C: Clock>(
+pub async fn handle_fetch_result<C: Clock>(
     app: &mut App,
     client: &Ll2Client<C>,
     cache_manager: &CacheManager<C>,
@@ -295,7 +295,7 @@ pub fn handle_fetch_result<C: Clock>(
                 total_count,
                 launches,
             };
-            if let Err(e) = cache_manager.save_launch_list(&cache) {
+            if let Err(e) = cache_manager.save_launch_list(&cache).await {
                 warn!(error = %e, "failed to save launch list cache");
             }
 
@@ -320,7 +320,7 @@ pub fn handle_fetch_result<C: Clock>(
             };
 
             // Persist to disk.
-            if let Err(e) = cache_manager.save_launch_detail(&cached) {
+            if let Err(e) = cache_manager.save_launch_detail(&cached).await {
                 warn!(error = %e, launch_id = %launch_id, "failed to save detail cache");
             }
 
@@ -451,8 +451,8 @@ mod tests {
 
     // --- handle_fetch_result: launch list ---
 
-    #[test]
-    fn fetch_result_launch_list_updates_app_state() {
+    #[tokio::test]
+    async fn fetch_result_launch_list_updates_app_state() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -472,7 +472,7 @@ mod tests {
                 launches: launches.clone(),
                 total_count: 42,
             },
-        );
+        ).await;
 
         assert_eq!(app.launches.len(), 2);
         assert_eq!(app.total_count, 42);
@@ -485,8 +485,8 @@ mod tests {
         assert!(app.rate_limit_total.is_some());
     }
 
-    #[test]
-    fn fetch_result_launch_list_persists_to_cache() {
+    #[tokio::test]
+    async fn fetch_result_launch_list_persists_to_cache() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -503,17 +503,17 @@ mod tests {
                 launches,
                 total_count: 1,
             },
-        );
+        ).await;
 
-        let loaded = cm.load_launch_list().unwrap();
+        let loaded = cm.load_launch_list().await.unwrap();
         assert!(loaded.is_some());
         let cached = loaded.unwrap();
         assert_eq!(cached.launches.len(), 1);
         assert_eq!(cached.launches[0].name, "Launch 1");
     }
 
-    #[test]
-    fn fetch_result_resets_selection_when_out_of_bounds() {
+    #[tokio::test]
+    async fn fetch_result_resets_selection_when_out_of_bounds() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -529,15 +529,15 @@ mod tests {
                 launches: vec![sample_launch("id-1", "Launch 1")],
                 total_count: 1,
             },
-        );
+        ).await;
 
         assert_eq!(app.selected_index, 0);
     }
 
     // --- handle_fetch_result: launch detail ---
 
-    #[test]
-    fn fetch_result_detail_populates_in_memory_cache() {
+    #[tokio::test]
+    async fn fetch_result_detail_populates_in_memory_cache() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -555,15 +555,15 @@ mod tests {
                 launch_id: launch_id.clone(),
                 detail: Box::new(detail),
             },
-        );
+        ).await;
 
         assert!(app.detail_cache.contains_key(&launch_id));
         let cached = &app.detail_cache[&launch_id];
         assert_eq!(cached.data.name, "Starship IFT-7");
     }
 
-    #[test]
-    fn fetch_result_detail_persists_to_disk() {
+    #[tokio::test]
+    async fn fetch_result_detail_persists_to_disk() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -581,15 +581,15 @@ mod tests {
                 launch_id: launch_id.clone(),
                 detail: Box::new(detail),
             },
-        );
+        ).await;
 
-        let loaded = cm.load_launch_detail(&launch_id).unwrap();
+        let loaded = cm.load_launch_detail(&launch_id).await.unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().data.name, "Starship IFT-7");
     }
 
-    #[test]
-    fn fetch_result_detail_clears_offline() {
+    #[tokio::test]
+    async fn fetch_result_detail_clears_offline() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -605,7 +605,7 @@ mod tests {
                 launch_id: "some-id".into(),
                 detail: Box::new(dummy_launch_detail()),
             },
-        );
+        ).await;
 
         assert!(!app.is_offline());
         assert!(app.error_state.is_none());
@@ -613,8 +613,8 @@ mod tests {
 
     // --- handle_fetch_result: errors ---
 
-    #[test]
-    fn fetch_result_error_sets_transient_error_state() {
+    #[tokio::test]
+    async fn fetch_result_error_sets_transient_error_state() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -630,7 +630,7 @@ mod tests {
                 status: 500,
                 message: "Server Error".into(),
             }),
-        );
+        ).await;
 
         assert!(!app.loading);
         match &app.error_state {
@@ -641,8 +641,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fetch_result_rate_limited_sets_rate_limited_state() {
+    #[tokio::test]
+    async fn fetch_result_rate_limited_sets_rate_limited_state() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -656,7 +656,7 @@ mod tests {
             &cm,
             &config,
             FetchResult::Error(AppError::RateLimited(available_at)),
-        );
+        ).await;
 
         match &app.error_state {
             Some(ErrorState::RateLimited {
@@ -668,8 +668,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn fetch_result_clears_offline_on_success() {
+    #[tokio::test]
+    async fn fetch_result_clears_offline_on_success() {
         let client = make_client();
         let (cm, _tmp) = make_cache_manager();
         let config = CacheConfig::default();
@@ -685,7 +685,7 @@ mod tests {
                 launches: vec![],
                 total_count: 0,
             },
-        );
+        ).await;
 
         assert!(!app.is_offline());
         assert!(app.error_state.is_none());

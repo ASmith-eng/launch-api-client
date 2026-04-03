@@ -68,7 +68,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
         dismiss_expired_errors(app);
 
         // Try loading a detail from disk cache before checking if we need a fetch.
-        maybe_load_detail_from_disk(app, cache_manager);
+        maybe_load_detail_from_disk(app, cache_manager).await;
 
         // State-driven fetch dispatch: check if the current screen needs data.
         // Proactive throttle sync takes priority (cheap, keeps rate limit accurate).
@@ -118,7 +118,7 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
             result = async { pending.as_mut().unwrap().as_mut().await },
                 if pending.is_some() => {
                 pending = None;
-                handle_fetch_result(app, &client, cache_manager, cache_config, result);
+                handle_fetch_result(app, &client, cache_manager, cache_config, result).await;
             }
 
             // Live countdown tick — re-render every second while on the

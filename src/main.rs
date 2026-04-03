@@ -60,6 +60,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app_state = cache_manager
         .load_app_state()
+        .await
         .unwrap_or_else(|e| {
             warn!(error = %e, "failed to load app_state.json, using defaults");
             None
@@ -90,7 +91,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "running cache pruning (startup #{})",
             app_state.startup_count
         );
-        if let Err(e) = cache_manager.prune_details(&config.cache) {
+        if let Err(e) = cache_manager.prune_details(&config.cache).await {
             warn!(error = %e, "cache pruning failed");
         }
         app_state.last_prune = Some(Utc::now());
@@ -119,7 +120,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 6. Load launch list from cache.
-    let cached_list = cache_manager.load_launch_list().unwrap_or_else(|e| {
+    let cached_list = cache_manager.load_launch_list().await.unwrap_or_else(|e| {
         warn!(error = %e, "failed to load cache.json");
         None
     });
@@ -188,7 +189,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         app_state.rate_limit = limiter.to_state();
     }
     app_state.last_startup = Utc::now();
-    if let Err(e) = cache_manager.save_app_state(&app_state) {
+    if let Err(e) = cache_manager.save_app_state(&app_state).await {
         warn!(error = %e, "failed to save app_state.json on exit");
     }
 
