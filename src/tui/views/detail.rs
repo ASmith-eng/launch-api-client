@@ -176,7 +176,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
 
     // Window + probability line (if any data present).
     let has_window = detail.window_start.is_some() && detail.window_end.is_some();
-    let has_probability = detail.probability.is_some_and(|p| p >= 0);
+    let has_probability = detail.probability.is_some();
 
     if has_window || has_probability {
         let mut spans: Vec<Span<'static>> = Vec::new();
@@ -195,13 +195,11 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
         }
 
         if let Some(prob) = detail.probability {
-            if prob >= 0 {
-                spans.push(Span::styled("Probability: ", style::label()));
-                spans.push(Span::styled(
-                    format!("{prob}%"),
-                    style::probability_style(Some(prob)),
-                ));
-            }
+            spans.push(Span::styled("Probability: ", style::label()));
+            spans.push(Span::styled(
+                format!("{prob}"),
+                style::probability_style(Some(prob)),
+            ));
         }
 
         lines.push(Line::from(spans).centered());
@@ -663,7 +661,8 @@ mod tests {
     use crate::cache::CacheStrategy;
     use crate::models::tests::dummy_launch_detail;
     use crate::models::{
-        LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Provider, UrlEntry,
+        LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Probability, Provider,
+        UrlEntry,
     };
 
     /// Build a richly populated detail for testing.
@@ -685,7 +684,7 @@ mod tests {
                 country: None,
             },
         };
-        d.probability = Some(90);
+        d.probability = Probability::new(90);
         d.weather_concerns = Some("No concerns".into());
         d.mission = Some(MissionSummary {
             name: "Starship IFT-7".into(),
@@ -784,7 +783,7 @@ mod tests {
     #[test]
     fn probability_high_renders_green() {
         let mut detail = rich_detail();
-        detail.probability = Some(90);
+        detail.probability = Probability::new(90);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("90%"))
@@ -796,7 +795,7 @@ mod tests {
     #[test]
     fn probability_medium_renders_yellow() {
         let mut detail = rich_detail();
-        detail.probability = Some(60);
+        detail.probability = Probability::new(60);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("60%"))
@@ -808,7 +807,7 @@ mod tests {
     #[test]
     fn probability_low_renders_red() {
         let mut detail = rich_detail();
-        detail.probability = Some(30);
+        detail.probability = Probability::new(30);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("30%"))
@@ -1010,9 +1009,9 @@ mod tests {
     }
 
     #[test]
-    fn probability_negative_is_hidden() {
+    fn probability_none_is_hidden() {
         let mut detail = rich_detail();
-        detail.probability = Some(-1);
+        detail.probability = None;
         let lines = build_content_lines(&detail, 120);
 
         let text: String = lines

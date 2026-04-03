@@ -546,7 +546,7 @@ mod tests {
             .expect("should succeed");
 
         assert_eq!(detail.name, "Starship IFT-7");
-        assert_eq!(detail.probability, Some(90));
+        assert_eq!(detail.probability, crate::models::Probability::new(90));
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
         assert_eq!(detail.provider_total_launches, Some(301));
         assert_eq!(detail.provider_successful_launches, Some(295));

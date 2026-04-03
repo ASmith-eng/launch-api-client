@@ -20,6 +20,7 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 ///
 /// The primary mechanism for terminal restoration. A panic hook is also
 /// registered as a belt-and-suspenders backup (see [`install_panic_hook`]).
+#[derive(Debug)]
 pub struct TerminalGuard;
 
 impl Drop for TerminalGuard {

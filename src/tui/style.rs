@@ -77,14 +77,14 @@ pub fn section_heading() -> Style {
 /// |----------|--------|
 /// | 80–100%  | Green  |
 /// | 50–79%   | Yellow |
-/// | < 50%    | Red    |
-/// | -1/null  | Dim gray ("N/A") |
-pub fn probability_style(probability: Option<i32>) -> Style {
-    match probability {
+/// | 0–49%    | Red    |
+/// | None     | Dim gray ("N/A") |
+pub fn probability_style(probability: Option<crate::models::Probability>) -> Style {
+    match probability.map(|p| p.value()) {
         Some(p) if p >= 80 => Style::default().fg(GREEN),
         Some(p) if p >= 50 => Style::default().fg(YELLOW),
-        Some(p) if p >= 0 => Style::default().fg(RED),
-        _ => label(), // -1 or None → dim gray
+        Some(_) => Style::default().fg(RED),
+        None => label(),
     }
 }
 
@@ -125,6 +125,11 @@ pub fn link_url() -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::Probability;
+
+    fn prob(v: u8) -> Option<Probability> {
+        Probability::new(v)
+    }
 
     #[test]
     fn primary_is_bold_white() {
@@ -163,25 +168,20 @@ mod tests {
 
     #[test]
     fn probability_high_is_green() {
-        assert_eq!(probability_style(Some(80)).fg, Some(Color::Green));
-        assert_eq!(probability_style(Some(100)).fg, Some(Color::Green));
+        assert_eq!(probability_style(prob(80)).fg, Some(Color::Green));
+        assert_eq!(probability_style(prob(100)).fg, Some(Color::Green));
     }
 
     #[test]
     fn probability_medium_is_yellow() {
-        assert_eq!(probability_style(Some(50)).fg, Some(Color::Yellow));
-        assert_eq!(probability_style(Some(79)).fg, Some(Color::Yellow));
+        assert_eq!(probability_style(prob(50)).fg, Some(Color::Yellow));
+        assert_eq!(probability_style(prob(79)).fg, Some(Color::Yellow));
     }
 
     #[test]
     fn probability_low_is_red() {
-        assert_eq!(probability_style(Some(0)).fg, Some(Color::Red));
-        assert_eq!(probability_style(Some(49)).fg, Some(Color::Red));
-    }
-
-    #[test]
-    fn probability_negative_is_dim_gray() {
-        assert_eq!(probability_style(Some(-1)).fg, Some(Color::DarkGray));
+        assert_eq!(probability_style(prob(0)).fg, Some(Color::Red));
+        assert_eq!(probability_style(prob(49)).fg, Some(Color::Red));
     }
 
     #[test]

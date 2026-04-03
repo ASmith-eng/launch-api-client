@@ -1,7 +1,54 @@
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CacheStrategy;
+
+/// Launch probability as a percentage (0–100).
+///
+/// Constructed via `Probability::new` or `TryFrom<u8>`, which reject values
+/// above 100. This prevents impossible states from propagating through the
+/// UI rendering code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct Probability(u8);
+
+impl Probability {
+    /// Create a new `Probability`, returning `None` if `value > 100`.
+    pub fn new(value: u8) -> Option<Self> {
+        if value <= 100 {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the inner percentage value.
+    pub fn value(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for Probability {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or_else(|| format!("probability {value} exceeds 100%"))
+    }
+}
+
+impl From<Probability> for u8 {
+    fn from(p: Probability) -> Self {
+        p.0
+    }
+}
+
+impl fmt::Display for Probability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}%", self.0)
+    }
+}
 
 /// Summary of a launch for use in the list view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,7 +140,7 @@ pub struct LaunchDetail {
     pub window_start: Option<DateTime<Utc>>,
     pub window_end: Option<DateTime<Utc>>,
     pub status: LaunchStatus,
-    pub probability: Option<i32>,
+    pub probability: Option<Probability>,
     pub weather_concerns: Option<String>,
     pub image_url: Option<String>,
     // Provider
