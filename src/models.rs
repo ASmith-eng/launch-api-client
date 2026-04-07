@@ -183,6 +183,14 @@ pub struct LaunchListCache {
     pub expires_at: DateTime<Utc>,
     pub total_count: u32,
     pub launches: Vec<LaunchSummary>,
+    /// API offset of the page this cache represents (`current_page * launches_per_page`).
+    /// Defaults to 0 for caches written before this field was introduced.
+    #[serde(default)]
+    pub page_offset: u32,
+    /// Filter selections active when this cache was written.
+    /// Defaults to all-unfiltered for caches written before this field was introduced.
+    #[serde(default)]
+    pub active_filters: ActiveFilters,
 }
 
 impl LaunchListCache {
@@ -231,6 +239,69 @@ pub struct RateLimitState {
 
 /// Current cache version. Bumped when the cache format changes.
 pub const CACHE_VERSION: u32 = 1;
+
+// ---------------------------------------------------------------------------
+// Filter snapshot types (persisted in cache.json)
+// ---------------------------------------------------------------------------
+
+/// Launch status filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum StatusFilter {
+    #[default]
+    All,
+    GoForLaunch,
+    Tbd,
+    Tbc,
+    OnHold,
+    InFlight,
+}
+
+/// Geographical region filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RegionFilter {
+    #[default]
+    All,
+    US,
+    Europe,
+    RussiaKazakhstan,
+    China,
+    India,
+    Japan,
+    NewZealand,
+}
+
+/// Crewed mission filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CrewedFilter {
+    #[default]
+    All,
+    CrewedOnly,
+    UncrewedOnly,
+}
+
+/// Date range filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DateRangeFilter {
+    #[default]
+    All,
+    Next7Days,
+    Next30Days,
+    Next90Days,
+}
+
+/// Snapshot of active filter selections, stored alongside the cached launch
+/// list so filter context can be restored across sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ActiveFilters {
+    #[serde(default)]
+    pub status: StatusFilter,
+    #[serde(default)]
+    pub region: RegionFilter,
+    #[serde(default)]
+    pub is_crewed: CrewedFilter,
+    #[serde(default)]
+    pub date_range: DateRangeFilter,
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -311,10 +382,42 @@ pub(crate) mod tests {
         assert_eq!(cache.launches.len(), 1);
         assert_eq!(cache.launches[0].name, "Starship IFT-7");
         assert_eq!(cache.launches[0].status.abbrev, "Go");
+        // Old-format JSON without new fields should default gracefully.
+        assert_eq!(cache.page_offset, 0);
+        assert_eq!(cache.active_filters.status, StatusFilter::All);
+        assert_eq!(cache.active_filters.region, RegionFilter::All);
+        assert_eq!(cache.active_filters.is_crewed, CrewedFilter::All);
+        assert_eq!(cache.active_filters.date_range, DateRangeFilter::All);
 
         let serialized = serde_json::to_string(&cache).unwrap();
         let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.launches[0].id, cache.launches[0].id);
+    }
+
+    #[test]
+    fn launch_list_cache_page_offset_and_filters_round_trip() {
+        let cache = LaunchListCache {
+            version: 1,
+            fetched_at: "2026-04-08T10:00:00Z".parse().unwrap(),
+            expires_at: "2026-04-08T10:30:00Z".parse().unwrap(),
+            total_count: 75,
+            launches: vec![],
+            page_offset: 25,
+            active_filters: ActiveFilters {
+                status: StatusFilter::GoForLaunch,
+                region: RegionFilter::US,
+                is_crewed: CrewedFilter::CrewedOnly,
+                date_range: DateRangeFilter::Next30Days,
+            },
+        };
+
+        let serialized = serde_json::to_string(&cache).unwrap();
+        let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.page_offset, 25);
+        assert_eq!(deserialized.active_filters.status, StatusFilter::GoForLaunch);
+        assert_eq!(deserialized.active_filters.region, RegionFilter::US);
+        assert_eq!(deserialized.active_filters.is_crewed, CrewedFilter::CrewedOnly);
+        assert_eq!(deserialized.active_filters.date_range, DateRangeFilter::Next30Days);
     }
 
     /// Round-trip test for `details/{uuid}.json`.

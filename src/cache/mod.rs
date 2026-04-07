@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 use crate::clock::Clock;
 use crate::config::CacheConfig;
 use crate::error::AppError;
-use crate::models::{AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION};
+use crate::models::{ActiveFilters, AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION};
 
 // ---------------------------------------------------------------------------
 // Cache strategy & TTL
@@ -403,6 +403,8 @@ mod tests {
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(30),
             total_count: 1,
+            page_offset: 0,
+            active_filters: ActiveFilters::default(),
             launches: vec![LaunchSummary {
                 id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
                 name: "Starship IFT-7".into(),
@@ -901,43 +903,20 @@ mod tests {
 
     #[test]
     fn launch_list_not_stale_before_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        // 29 minutes later — still fresh
-        assert!(!list.is_stale(now + TimeDelta::minutes(29)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(!list.is_stale(base_time() + TimeDelta::minutes(29)));
     }
 
     #[test]
     fn launch_list_stale_at_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        // Exactly at expires_at — stale
-        assert!(list.is_stale(now + TimeDelta::minutes(30)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(list.is_stale(base_time() + TimeDelta::minutes(30)));
     }
 
     #[test]
     fn launch_list_stale_after_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        assert!(list.is_stale(now + TimeDelta::hours(1)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(list.is_stale(base_time() + TimeDelta::hours(1)));
     }
 
     #[test]
@@ -1050,11 +1029,9 @@ mod tests {
 
         let expires = compute_expires_at(strategy, now, &config);
         let list = LaunchListCache {
-            version: CACHE_VERSION,
             fetched_at: now,
             expires_at: expires,
-            total_count: 0,
-            launches: vec![],
+            ..sample_launch_list()
         };
 
         // Advance clock by 2 hours — still fresh (TTL = 3h)
@@ -1335,17 +1312,10 @@ mod tests {
 
     #[test]
     fn clock_backward_jump_stale_cache_handled_correctly() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
         // Clock jumps backward 1 hour — expires_at is now in the future
         // relative to the jumped-back time.
-        let jumped_back = now - TimeDelta::hours(1);
+        let jumped_back = base_time() - TimeDelta::hours(1);
         assert!(!list.is_stale(jumped_back));
     }
 

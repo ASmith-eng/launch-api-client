@@ -22,6 +22,7 @@ use vendor::launch_library_2::endpoints::PROD_BASE_URL;
 use models::{AppState, CACHE_VERSION};
 use tui::app::App;
 use tui::event::run_event_loop;
+use tui::filter::FilterState;
 use tui::terminal::{install_panic_hook, setup_terminal};
 
 #[tokio::main]
@@ -125,38 +126,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     });
 
-    let needs_refresh = match cached_list {
-        Some(ref cache) if !cache.is_stale(clock.now()) => {
-            info!(
-                count = cache.launches.len(),
-                "loaded fresh launch list from cache"
-            );
-            false
-        }
-        Some(_) => {
-            info!("cached launch list is stale, will re-fetch");
-            true
-        }
-        None => {
-            info!("no cached launch list, will fetch");
-            false // Empty list triggers auto-fetch via event loop state check.
-        }
-    };
-
     // 7. Set up terminal and TUI.
     install_panic_hook();
     let (mut terminal, _guard) = setup_terminal()?;
 
     let size = terminal.size()?;
     let mut app = App::new((size.width, size.height));
-
-    // Populate app with cached data (if any).
-    if let Some(ref cache) = cached_list {
-        app.launches = cache.launches.clone();
-        app.total_count = cache.total_count;
-        app.cache_fetched_at = Some(cache.fetched_at);
-        app.cache_expires_at = Some(cache.expires_at);
-    }
 
     // Populate rate limit display from current limiter state.
     {
@@ -165,8 +140,55 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.rate_limit_total = Some(limiter.limit() as u32);
     }
 
+    // Set launches_per_page before restoring cache so page derivation uses
+    // the configured value, not the App::new default.
     app.ui_config = config.ui.clone();
     app.launches_per_page = config.ui.launches_per_page;
+
+    // Restore session state from cache (if any).
+    //
+    // Fresh cache  → restore page position, cached data, and filter state.
+    //                No API request needed.
+    // Stale cache  → restore filter state only; reset to page 1 so the
+    //                re-fetch starts from the beginning with the right filters.
+    // No cache     → start from scratch; event loop auto-fetches page 1.
+    let needs_refresh = match cached_list {
+        Some(ref cache) if !cache.is_stale(clock.now()) => {
+            // Derive the page the cache represents. If launches_per_page has
+            // changed since the cache was written the offset won't divide
+            // evenly — fall back to page 0 in that case.
+            let restored_page = if app.launches_per_page > 0
+                && cache.page_offset % app.launches_per_page == 0
+            {
+                cache.page_offset / app.launches_per_page
+            } else {
+                0
+            };
+
+            info!(
+                count = cache.launches.len(),
+                page = restored_page + 1,
+                "loaded fresh launch list from cache"
+            );
+
+            app.launches = cache.launches.clone();
+            app.total_count = cache.total_count;
+            app.cache_fetched_at = Some(cache.fetched_at);
+            app.cache_expires_at = Some(cache.expires_at);
+            app.current_page = restored_page;
+            app.filter_state = FilterState::from_active_filters(&cache.active_filters);
+            false
+        }
+        Some(ref cache) => {
+            info!("cached launch list is stale, will re-fetch from page 1");
+            app.filter_state = FilterState::from_active_filters(&cache.active_filters);
+            true
+        }
+        None => {
+            info!("no cached launch list, will fetch");
+            false // Empty launches triggers auto-fetch via event loop state check.
+        }
+    };
 
     // If cache is stale, signal the event loop to refresh on first iteration.
     if needs_refresh {

@@ -294,6 +294,8 @@ pub async fn handle_fetch_result<C: Clock>(
                 expires_at,
                 total_count,
                 launches,
+                page_offset: app.page_offset(),
+                active_filters: app.filter_state.to_active_filters(),
             };
             if let Err(e) = cache_manager.save_launch_list(&cache).await {
                 warn!(error = %e, "failed to save launch list cache");

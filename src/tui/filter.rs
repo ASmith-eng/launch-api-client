@@ -11,6 +11,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+pub use crate::models::{ActiveFilters, CrewedFilter, DateRangeFilter, RegionFilter, StatusFilter};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 use crate::vendor::launch_library_2::region_map;
 
@@ -59,20 +60,8 @@ pub trait FilterOption: Copy + Default + PartialEq + 'static {
 }
 
 // ---------------------------------------------------------------------------
-// Filter enums
+// FilterOption implementations
 // ---------------------------------------------------------------------------
-
-/// Launch status filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StatusFilter {
-    #[default]
-    All,
-    GoForLaunch,
-    Tbd,
-    Tbc,
-    OnHold,
-    InFlight,
-}
 
 impl FilterOption for StatusFilter {
     fn all() -> &'static [Self] {
@@ -110,20 +99,6 @@ impl StatusFilter {
             Self::InFlight => Some("6".into()),
         }
     }
-}
-
-/// Geographical region filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RegionFilter {
-    #[default]
-    All,
-    US,
-    Europe,
-    RussiaKazakhstan,
-    China,
-    India,
-    Japan,
-    NewZealand,
 }
 
 impl FilterOption for RegionFilter {
@@ -171,15 +146,6 @@ impl RegionFilter {
     }
 }
 
-/// Crewed mission filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CrewedFilter {
-    #[default]
-    All,
-    CrewedOnly,
-    UncrewedOnly,
-}
-
 impl FilterOption for CrewedFilter {
     fn all() -> &'static [Self] {
         &[Self::All, Self::CrewedOnly, Self::UncrewedOnly]
@@ -203,16 +169,6 @@ impl CrewedFilter {
             Self::UncrewedOnly => Some(false),
         }
     }
-}
-
-/// Date range filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DateRangeFilter {
-    #[default]
-    All,
-    Next7Days,
-    Next30Days,
-    Next90Days,
 }
 
 impl FilterOption for DateRangeFilter {
@@ -324,6 +280,30 @@ impl FilterState {
             (CATEGORY_NAMES[2], self.is_crewed.label()),
             (CATEGORY_NAMES[3], self.date_range.label()),
         ]
+    }
+
+    /// Snapshot the current filter selections for persistence.
+    pub fn to_active_filters(&self) -> ActiveFilters {
+        ActiveFilters {
+            status: self.status,
+            region: self.region,
+            is_crewed: self.is_crewed,
+            date_range: self.date_range,
+        }
+    }
+
+    /// Restore filter selections from a persisted snapshot.
+    ///
+    /// `active_category` is always reset to 0 since the focused UI element
+    /// is not meaningful to persist.
+    pub fn from_active_filters(snapshot: &ActiveFilters) -> Self {
+        Self {
+            active_category: 0,
+            status: snapshot.status,
+            region: snapshot.region,
+            is_crewed: snapshot.is_crewed,
+            date_range: snapshot.date_range,
+        }
     }
 }
 
@@ -456,6 +436,48 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 3, 1, 12, 0, 0).unwrap();
         let result = DateRangeFilter::Next7Days.net_lt(now).unwrap();
         assert!(result.starts_with("2026-03-08"));
+    }
+
+    // --- FilterState: snapshot round-trip ---
+
+    #[test]
+    fn to_active_filters_captures_all_selections() {
+        let mut f = FilterState::default();
+        f.status = StatusFilter::GoForLaunch;
+        f.region = RegionFilter::Europe;
+        f.is_crewed = CrewedFilter::CrewedOnly;
+        f.date_range = DateRangeFilter::Next30Days;
+        f.active_category = 2;
+
+        let snap = f.to_active_filters();
+        assert_eq!(snap.status, StatusFilter::GoForLaunch);
+        assert_eq!(snap.region, RegionFilter::Europe);
+        assert_eq!(snap.is_crewed, CrewedFilter::CrewedOnly);
+        assert_eq!(snap.date_range, DateRangeFilter::Next30Days);
+    }
+
+    #[test]
+    fn from_active_filters_restores_selections_and_resets_category() {
+        let snap = ActiveFilters {
+            status: StatusFilter::Tbd,
+            region: RegionFilter::Japan,
+            is_crewed: CrewedFilter::UncrewedOnly,
+            date_range: DateRangeFilter::Next7Days,
+        };
+
+        let f = FilterState::from_active_filters(&snap);
+        assert_eq!(f.active_category, 0);
+        assert_eq!(f.status, StatusFilter::Tbd);
+        assert_eq!(f.region, RegionFilter::Japan);
+        assert_eq!(f.is_crewed, CrewedFilter::UncrewedOnly);
+        assert_eq!(f.date_range, DateRangeFilter::Next7Days);
+    }
+
+    #[test]
+    fn from_active_filters_default_snapshot_gives_default_state() {
+        let f = FilterState::from_active_filters(&ActiveFilters::default());
+        assert!(!f.has_active_filters());
+        assert_eq!(f.active_category, 0);
     }
 
     // --- FilterState ---
