@@ -280,6 +280,9 @@ pub async fn handle_fetch_result<C: Clock>(
             app.launches = launches.clone();
             app.total_count = total_count;
 
+            // Populate the in-memory page cache so back-navigation is instant.
+            app.page_cache.insert(app.current_page, app.launches.clone());
+
             // Reset selection if it's now out of bounds.
             if app.selected_index >= app.launches.len() && !app.launches.is_empty() {
                 app.selected_index = app.launches.len() - 1;

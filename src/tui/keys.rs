@@ -50,19 +50,13 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') => {
             // Next page — only if not on the last page and not loading.
             if !app.loading && app.current_page + 1 < app.total_pages() {
-                app.current_page += 1;
-                app.launches.clear();
-                app.selected_index = 0;
-                app.list_scroll_offset = 0;
+                navigate_page(app, app.current_page + 1);
             }
         }
         KeyCode::Char('p') => {
             // Previous page — only if not on the first page and not loading.
             if !app.loading && app.current_page > 0 {
-                app.current_page -= 1;
-                app.launches.clear();
-                app.selected_index = 0;
-                app.list_scroll_offset = 0;
+                navigate_page(app, app.current_page - 1);
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
@@ -95,6 +89,28 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
             }
         }
         _ => {}
+    }
+}
+
+/// Switch to `target_page`, stashing the current page's data in the
+/// in-memory cache and restoring the target page from it if available.
+///
+/// If the target page is not cached, `launches` is cleared so that
+/// `check_needs_fetch` triggers an API request on the next event loop tick.
+fn navigate_page(app: &mut App, target_page: u32) {
+    // Stash the current page before leaving it (skip if empty — nothing to save).
+    if !app.launches.is_empty() {
+        app.page_cache.insert(app.current_page, app.launches.clone());
+    }
+
+    app.current_page = target_page;
+    app.selected_index = 0;
+    app.list_scroll_offset = 0;
+
+    if let Some(cached) = app.page_cache.get(&target_page) {
+        app.launches = cached.clone();
+    } else {
+        app.launches.clear();
     }
 }
 
@@ -152,6 +168,7 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
             // Apply: promote editing filter to active, clear list to trigger re-fetch.
             if let Some(edited) = app.editing_filter.take() {
                 app.filter_state = edited;
+                app.page_cache.clear();
                 app.launches.clear();
                 app.selected_index = 0;
                 app.list_scroll_offset = 0;
@@ -223,7 +240,7 @@ mod tests {
     // --- Pagination key tests ---
 
     #[test]
-    fn next_page_advances_and_clears_launches() {
+    fn next_page_advances_and_clears_launches_when_uncached() {
         let mut app = App::new((120, 40));
         app.launches = vec![sample_launch("1")];
         app.total_count = 50; // 2 pages at 25 per page
@@ -233,9 +250,37 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Char('n')));
 
         assert_eq!(app.current_page, 1);
-        assert!(app.launches.is_empty());
+        assert!(app.launches.is_empty()); // page 1 not cached yet — triggers fetch
         assert_eq!(app.selected_index, 0);
         assert_eq!(app.list_scroll_offset, 0);
+    }
+
+    #[test]
+    fn next_page_serves_from_cache_when_available() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 0;
+        app.launches = vec![sample_launch("page0")];
+        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1);
+        assert_eq!(app.launches.len(), 1);
+        assert_eq!(app.launches[0].id, "page1-cached");
+    }
+
+    #[test]
+    fn next_page_stashes_current_page_into_cache() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 0;
+        app.launches = vec![sample_launch("page0")];
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert!(app.page_cache.contains_key(&0));
+        assert_eq!(app.page_cache[&0][0].id, "page0");
     }
 
     #[test]
@@ -252,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn prev_page_goes_back_and_clears_launches() {
+    fn prev_page_goes_back_and_clears_launches_when_uncached() {
         let mut app = App::new((120, 40));
         app.launches = vec![sample_launch("1")];
         app.total_count = 75;
@@ -262,8 +307,23 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Char('p')));
 
         assert_eq!(app.current_page, 1);
-        assert!(app.launches.is_empty());
+        assert!(app.launches.is_empty()); // page 1 not cached yet — triggers fetch
         assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn prev_page_serves_from_cache_when_available() {
+        let mut app = App::new((120, 40));
+        app.total_count = 75;
+        app.current_page = 2;
+        app.launches = vec![sample_launch("page2")];
+        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+        assert_eq!(app.launches.len(), 1);
+        assert_eq!(app.launches[0].id, "page1-cached");
     }
 
     #[test]
@@ -326,5 +386,18 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Enter));
 
         assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn filter_apply_clears_page_cache() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        app.editing_filter = Some(crate::tui::filter::FilterState::default());
+        app.page_cache.insert(0, vec![sample_launch("a")]);
+        app.page_cache.insert(1, vec![sample_launch("b")]);
+
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(app.page_cache.is_empty());
     }
 }

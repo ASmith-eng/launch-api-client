@@ -45,6 +45,11 @@ pub struct App {
     pub detail_scroll_offset: usize,
     /// In-memory detail cache (loaded on demand).
     pub detail_cache: HashMap<String, LaunchDetailCache>,
+    /// In-memory page cache for the list view.
+    ///
+    /// Keyed by zero-based page index. Populated when a page is fetched and
+    /// when navigating away from a page. Cleared when filters change.
+    pub page_cache: HashMap<u32, Vec<LaunchSummary>>,
     /// Whether an API request is currently in-flight.
     pub loading: bool,
     /// Current error state shown to the user (if any).
@@ -87,6 +92,7 @@ impl App {
             list_scroll_offset: 0,
             detail_scroll_offset: 0,
             detail_cache: HashMap::new(),
+            page_cache: HashMap::new(),
             loading: false,
             error_state: None,
             filter_state: FilterState::default(),
