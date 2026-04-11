@@ -5,7 +5,7 @@
 //! blank separator line.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -14,7 +14,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::styled_block;
+use crate::tui::views::styled_block_with_line;
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Height of a single launch item in lines (name + provider + blank separator).
@@ -24,7 +24,7 @@ const ITEM_HEIGHT: usize = 3;
 pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     // Build the outer block with title and rate limit info.
     let title = build_title(app);
-    let block = styled_block(&title);
+    let block = styled_block_with_line(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -50,34 +50,38 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     render_hint_bar(frame, hint_area, app);
 }
 
-/// Build the title string: "Launches — Showing N of M — Page X of Y" with optional rate limit.
-fn build_title(app: &App) -> String {
-    let filtered = if app.filter_state.has_active_filters() {
-        " [Filtered]"
+/// Build the title line: "Launches [Filtered] — Showing N of M — Page X of Y"
+/// with the `[Filtered]` tag rendered in Cyan when active.
+fn build_title(app: &App) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    if app.loading {
+        spans.push(Span::raw(" Fetching launches... "));
     } else {
-        ""
-    };
-    let left = if app.loading {
-        " Fetching launches... ".to_string()
-    } else {
+        spans.push(Span::raw(" Launches"));
+
+        if app.filter_state.has_active_filters() {
+            spans.push(Span::styled(" [Filtered]", Style::default().fg(Color::Cyan)));
+        }
+
         let page_info = if app.total_pages() > 1 {
             format!(" — Page {} of {}", app.current_page + 1, app.total_pages())
         } else {
             String::new()
         };
-        format!(
-            " Launches{filtered} — Showing {} of {}{page_info} ",
+
+        spans.push(Span::raw(format!(
+            " — Showing {} of {}{page_info} ",
             app.launches.len(),
             app.total_count,
-        )
-    };
-
-    match (app.rate_limit_remaining, app.rate_limit_total) {
-        (Some(remaining), Some(total)) => {
-            format!("{left}── {remaining}/{total} reqs ")
-        }
-        _ => left,
+        )));
     }
+
+    if let (Some(remaining), Some(total)) = (app.rate_limit_remaining, app.rate_limit_total) {
+        spans.push(Span::raw(format!("── {remaining}/{total} reqs ")));
+    }
+
+    Line::from(spans)
 }
 
 /// Render the scrollable launch items into the given area.

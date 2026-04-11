@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 use crate::clock::Clock;
 use crate::config::CacheConfig;
 use crate::error::AppError;
-use crate::models::{ActiveFilters, AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION};
+use crate::models::{AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION};
 
 // ---------------------------------------------------------------------------
 // Cache strategy & TTL

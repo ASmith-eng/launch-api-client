@@ -26,7 +26,7 @@ pub fn launches_upcoming_url(base_url: &str, params: &ListParams) -> String {
         url.push_str(&format!("&is_crewed={crewed}"));
     }
     if let Some(ref loc) = params.pad_location {
-        url.push_str(&format!("&pad__location={loc}"));
+        url.push_str(&format!("&pad__location__in={loc}"));
     }
     if let Some(ref gt) = params.net_gt {
         url.push_str(&format!("&net__gt={gt}"));
@@ -115,7 +115,7 @@ mod tests {
         assert!(url.contains("offset=20"));
         assert!(url.contains("status__ids=1,2"));
         assert!(url.contains("is_crewed=true"));
-        assert!(url.contains("pad__location=12"));
+        assert!(url.contains("pad__location__in=12"));
         assert!(url.contains("net__gt=2026-01-01"));
         assert!(url.contains("net__lt=2026-12-31"));
         assert!(url.contains("search=starship"));
