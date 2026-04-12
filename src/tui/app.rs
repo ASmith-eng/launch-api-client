@@ -45,6 +45,11 @@ pub struct App {
     pub detail_scroll_offset: usize,
     /// In-memory detail cache (loaded on demand).
     pub detail_cache: HashMap<String, LaunchDetailCache>,
+    /// In-memory page cache for the list view.
+    ///
+    /// Keyed by zero-based page index. Populated when a page is fetched and
+    /// when navigating away from a page. Cleared when filters change.
+    pub page_cache: HashMap<u32, Vec<LaunchSummary>>,
     /// Whether an API request is currently in-flight.
     pub loading: bool,
     /// Current error state shown to the user (if any).
@@ -69,6 +74,8 @@ pub struct App {
     pub ui_config: UiConfig,
     /// Number of launches per page for API requests.
     pub launches_per_page: u32,
+    /// Current page index (zero-based). Displayed as `current_page + 1`.
+    pub current_page: u32,
     /// Whether the user has requested a manual refresh (`r` key).
     pub refresh_requested: bool,
     /// Whether the app should exit on the next loop iteration.
@@ -85,6 +92,7 @@ impl App {
             list_scroll_offset: 0,
             detail_scroll_offset: 0,
             detail_cache: HashMap::new(),
+            page_cache: HashMap::new(),
             loading: false,
             error_state: None,
             filter_state: FilterState::default(),
@@ -97,6 +105,7 @@ impl App {
             cache_expires_at: None,
             ui_config: UiConfig::default(),
             launches_per_page: 25,
+            current_page: 0,
             refresh_requested: false,
             should_quit: false,
         }
@@ -112,5 +121,87 @@ impl App {
     /// Derived from `error_state` — there is no separate boolean flag.
     pub fn is_offline(&self) -> bool {
         matches!(self.error_state, Some(ErrorState::Offline))
+    }
+
+    /// Total number of pages, derived from `total_count` and `launches_per_page`.
+    ///
+    /// Returns at least 1 so page display is never "Page 0 of 0".
+    pub fn total_pages(&self) -> u32 {
+        if self.total_count == 0 || self.launches_per_page == 0 {
+            return 1;
+        }
+        self.total_count.div_ceil(self.launches_per_page)
+    }
+
+    /// API offset for the current page.
+    pub fn page_offset(&self) -> u32 {
+        self.current_page * self.launches_per_page
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn total_pages_zero_count() {
+        let app = App::new((120, 40));
+        assert_eq!(app.total_pages(), 1);
+    }
+
+    #[test]
+    fn total_pages_exact_multiple() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.launches_per_page = 25;
+        assert_eq!(app.total_pages(), 2);
+    }
+
+    #[test]
+    fn total_pages_with_remainder() {
+        let mut app = App::new((120, 40));
+        app.total_count = 51;
+        app.launches_per_page = 25;
+        assert_eq!(app.total_pages(), 3);
+    }
+
+    #[test]
+    fn total_pages_fewer_than_page_size() {
+        let mut app = App::new((120, 40));
+        app.total_count = 10;
+        app.launches_per_page = 25;
+        assert_eq!(app.total_pages(), 1);
+    }
+
+    #[test]
+    fn total_pages_single_item() {
+        let mut app = App::new((120, 40));
+        app.total_count = 1;
+        app.launches_per_page = 25;
+        assert_eq!(app.total_pages(), 1);
+    }
+
+    #[test]
+    fn page_offset_first_page() {
+        let mut app = App::new((120, 40));
+        app.current_page = 0;
+        app.launches_per_page = 25;
+        assert_eq!(app.page_offset(), 0);
+    }
+
+    #[test]
+    fn page_offset_second_page() {
+        let mut app = App::new((120, 40));
+        app.current_page = 1;
+        app.launches_per_page = 25;
+        assert_eq!(app.page_offset(), 25);
+    }
+
+    #[test]
+    fn page_offset_third_page() {
+        let mut app = App::new((120, 40));
+        app.current_page = 2;
+        app.launches_per_page = 10;
+        assert_eq!(app.page_offset(), 20);
     }
 }

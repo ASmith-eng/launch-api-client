@@ -11,6 +11,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+pub use crate::models::{ActiveFilters, CrewedFilter, DateRangeFilter, RegionFilter, StatusFilter};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 use crate::vendor::launch_library_2::region_map;
 
@@ -59,28 +60,16 @@ pub trait FilterOption: Copy + Default + PartialEq + 'static {
 }
 
 // ---------------------------------------------------------------------------
-// Filter enums
+// FilterOption implementations
 // ---------------------------------------------------------------------------
-
-/// Launch status filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StatusFilter {
-    #[default]
-    All,
-    GoForLaunch,
-    TBD,
-    TBC,
-    OnHold,
-    InFlight,
-}
 
 impl FilterOption for StatusFilter {
     fn all() -> &'static [Self] {
         &[
             Self::All,
             Self::GoForLaunch,
-            Self::TBD,
-            Self::TBC,
+            Self::Tbd,
+            Self::Tbc,
             Self::OnHold,
             Self::InFlight,
         ]
@@ -90,8 +79,8 @@ impl FilterOption for StatusFilter {
         match self {
             Self::All => "All",
             Self::GoForLaunch => "Go for Launch",
-            Self::TBD => "TBD",
-            Self::TBC => "TBC",
+            Self::Tbd => "TBD",
+            Self::Tbc => "TBC",
             Self::OnHold => "On Hold",
             Self::InFlight => "In Flight",
         }
@@ -104,26 +93,12 @@ impl StatusFilter {
         match self {
             Self::All => None,
             Self::GoForLaunch => Some("1".into()),
-            Self::TBD => Some("2".into()),
-            Self::TBC => Some("8".into()),
+            Self::Tbd => Some("2".into()),
+            Self::Tbc => Some("8".into()),
             Self::OnHold => Some("5".into()),
             Self::InFlight => Some("6".into()),
         }
     }
-}
-
-/// Geographical region filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RegionFilter {
-    #[default]
-    All,
-    US,
-    Europe,
-    RussiaKazakhstan,
-    China,
-    India,
-    Japan,
-    NewZealand,
 }
 
 impl FilterOption for RegionFilter {
@@ -171,15 +146,6 @@ impl RegionFilter {
     }
 }
 
-/// Crewed mission filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CrewedFilter {
-    #[default]
-    All,
-    CrewedOnly,
-    UncrewedOnly,
-}
-
 impl FilterOption for CrewedFilter {
     fn all() -> &'static [Self] {
         &[Self::All, Self::CrewedOnly, Self::UncrewedOnly]
@@ -203,16 +169,6 @@ impl CrewedFilter {
             Self::UncrewedOnly => Some(false),
         }
     }
-}
-
-/// Date range filter options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DateRangeFilter {
-    #[default]
-    All,
-    Next7Days,
-    Next30Days,
-    Next90Days,
 }
 
 impl FilterOption for DateRangeFilter {
@@ -297,6 +253,14 @@ impl FilterState {
         self.active_category = (self.active_category + 1) % NUM_FILTER_CATEGORIES;
     }
 
+    /// Reset all filter categories to their defaults.
+    pub fn clear_all(&mut self) {
+        self.status = StatusFilter::default();
+        self.region = RegionFilter::default();
+        self.is_crewed = CrewedFilter::default();
+        self.date_range = DateRangeFilter::default();
+    }
+
     /// Whether any filter is active (non-default).
     pub fn has_active_filters(&self) -> bool {
         !self.status.is_default()
@@ -324,6 +288,30 @@ impl FilterState {
             (CATEGORY_NAMES[2], self.is_crewed.label()),
             (CATEGORY_NAMES[3], self.date_range.label()),
         ]
+    }
+
+    /// Snapshot the current filter selections for persistence.
+    pub fn to_active_filters(&self) -> ActiveFilters {
+        ActiveFilters {
+            status: self.status,
+            region: self.region,
+            is_crewed: self.is_crewed,
+            date_range: self.date_range,
+        }
+    }
+
+    /// Restore filter selections from a persisted snapshot.
+    ///
+    /// `active_category` is always reset to 0 since the focused UI element
+    /// is not meaningful to persist.
+    pub fn from_active_filters(snapshot: &ActiveFilters) -> Self {
+        Self {
+            active_category: 0,
+            status: snapshot.status,
+            region: snapshot.region,
+            is_crewed: snapshot.is_crewed,
+            date_range: snapshot.date_range,
+        }
     }
 }
 
@@ -414,8 +402,8 @@ mod tests {
     fn status_filter_api_ids() {
         assert_eq!(StatusFilter::All.status_ids(), None);
         assert_eq!(StatusFilter::GoForLaunch.status_ids(), Some("1".into()));
-        assert_eq!(StatusFilter::TBD.status_ids(), Some("2".into()));
-        assert_eq!(StatusFilter::TBC.status_ids(), Some("8".into()));
+        assert_eq!(StatusFilter::Tbd.status_ids(), Some("2".into()));
+        assert_eq!(StatusFilter::Tbc.status_ids(), Some("8".into()));
         assert_eq!(StatusFilter::OnHold.status_ids(), Some("5".into()));
         assert_eq!(StatusFilter::InFlight.status_ids(), Some("6".into()));
     }
@@ -458,7 +446,74 @@ mod tests {
         assert!(result.starts_with("2026-03-08"));
     }
 
+    // --- FilterState: snapshot round-trip ---
+
+    #[test]
+    fn to_active_filters_captures_all_selections() {
+        let mut f = FilterState::default();
+        f.status = StatusFilter::GoForLaunch;
+        f.region = RegionFilter::Europe;
+        f.is_crewed = CrewedFilter::CrewedOnly;
+        f.date_range = DateRangeFilter::Next30Days;
+        f.active_category = 2;
+
+        let snap = f.to_active_filters();
+        assert_eq!(snap.status, StatusFilter::GoForLaunch);
+        assert_eq!(snap.region, RegionFilter::Europe);
+        assert_eq!(snap.is_crewed, CrewedFilter::CrewedOnly);
+        assert_eq!(snap.date_range, DateRangeFilter::Next30Days);
+    }
+
+    #[test]
+    fn from_active_filters_restores_selections_and_resets_category() {
+        let snap = ActiveFilters {
+            status: StatusFilter::Tbd,
+            region: RegionFilter::Japan,
+            is_crewed: CrewedFilter::UncrewedOnly,
+            date_range: DateRangeFilter::Next7Days,
+        };
+
+        let f = FilterState::from_active_filters(&snap);
+        assert_eq!(f.active_category, 0);
+        assert_eq!(f.status, StatusFilter::Tbd);
+        assert_eq!(f.region, RegionFilter::Japan);
+        assert_eq!(f.is_crewed, CrewedFilter::UncrewedOnly);
+        assert_eq!(f.date_range, DateRangeFilter::Next7Days);
+    }
+
+    #[test]
+    fn from_active_filters_default_snapshot_gives_default_state() {
+        let f = FilterState::from_active_filters(&ActiveFilters::default());
+        assert!(!f.has_active_filters());
+        assert_eq!(f.active_category, 0);
+    }
+
     // --- FilterState ---
+
+    #[test]
+    fn clear_all_resets_every_category_to_default() {
+        let mut f = FilterState {
+            active_category: 2,
+            status: StatusFilter::GoForLaunch,
+            region: RegionFilter::Europe,
+            is_crewed: CrewedFilter::CrewedOnly,
+            date_range: DateRangeFilter::Next30Days,
+        };
+        f.clear_all();
+        assert!(f.status.is_default());
+        assert!(f.region.is_default());
+        assert!(f.is_crewed.is_default());
+        assert!(f.date_range.is_default());
+        // active_category is preserved — only values are cleared.
+        assert_eq!(f.active_category, 2);
+    }
+
+    #[test]
+    fn clear_all_on_default_state_is_noop() {
+        let mut f = FilterState::default();
+        f.clear_all();
+        assert!(!f.has_active_filters());
+    }
 
     #[test]
     fn filter_state_default_has_no_active_filters() {

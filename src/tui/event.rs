@@ -19,10 +19,12 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use tokio::signal;
+use tokio::time::{interval, MissedTickBehavior};
 use tracing::debug;
 
 use crate::api::client::Ll2Client;
@@ -30,7 +32,7 @@ use crate::cache::CacheManager;
 use crate::clock::Clock;
 use crate::config::CacheConfig;
 use crate::error::AppError;
-use crate::tui::app::App;
+use crate::tui::app::{App, AppScreen};
 use crate::tui::fetch::{
     check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors, handle_fetch_result,
     maybe_load_detail_from_disk, spawn_fetch, FetchResult,
@@ -55,17 +57,23 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
     let ctrl_c = signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
+    // 1-second tick for live countdown updates on the Detail screen.
+    // `MissedTickBehavior::Skip` avoids bursts of redraws if a frame takes
+    // longer than 1 s (e.g. during a slow API call).
+    let mut tick = interval(Duration::from_secs(1));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
     loop {
         // Auto-dismiss transient errors.
         dismiss_expired_errors(app);
 
         // Try loading a detail from disk cache before checking if we need a fetch.
-        maybe_load_detail_from_disk(app, cache_manager);
+        maybe_load_detail_from_disk(app, cache_manager).await;
 
         // State-driven fetch dispatch: check if the current screen needs data.
         // Proactive throttle sync takes priority (cheap, keeps rate limit accurate).
         if pending.is_none() {
-            if let Some(kind) = check_needs_throttle_sync(app, &client) {
+            if let Some(kind) = check_needs_throttle_sync(app, &client).await {
                 pending = Some(spawn_fetch(kind, &client, app));
             } else if let Some(kind) = check_needs_fetch(app) {
                 app.refresh_requested = false;
@@ -110,7 +118,16 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
             result = async { pending.as_mut().unwrap().as_mut().await },
                 if pending.is_some() => {
                 pending = None;
-                handle_fetch_result(app, &client, cache_manager, cache_config, result);
+                handle_fetch_result(app, &client, cache_manager, cache_config, result).await;
+            }
+
+            // Live countdown tick — re-render every second while on the
+            // Detail screen so the countdown timer visibly decrements.
+            // On other screens the tick fires but we skip the redraw.
+            _ = tick.tick(), if matches!(app.screen, AppScreen::Detail(_)) => {
+                // No state change needed — countdown is computed at render
+                // time from the launch's `net` field. The next loop iteration
+                // will call `render()`.
             }
         }
 

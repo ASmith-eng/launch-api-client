@@ -8,11 +8,12 @@
 //! launch status and proximity. The [`CacheManager`] accepts a [`Clock`]
 //! implementation for testable time queries.
 
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use tokio::io::ErrorKind;
+
 use chrono::{DateTime, TimeDelta, Utc};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::clock::Clock;
@@ -25,7 +26,8 @@ use crate::models::{AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION}
 // ---------------------------------------------------------------------------
 
 /// Cache TTL tier determined by launch status and proximity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CacheStrategy {
     /// Past launches (status 3, 4, 7) — data is final, never expires.
     Permanent,
@@ -79,16 +81,6 @@ impl CacheStrategy {
         }
     }
 
-    /// Human-readable name stored in `LaunchDetailCache.ttl_strategy`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Permanent => "permanent",
-            Self::LongTerm => "long_term",
-            Self::MediumTerm => "medium_term",
-            Self::ShortTerm => "short_term",
-            Self::RealTime => "real_time",
-        }
-    }
 }
 
 /// Compute the `expires_at` timestamp for a given strategy.
@@ -140,35 +132,35 @@ impl<C: Clock> CacheManager<C> {
 
     // -- App state --------------------------------------------------------
 
-    pub fn load_app_state(&self) -> Result<Option<AppState>, AppError> {
-        load_versioned(&self.app_state_path())
+    pub async fn load_app_state(&self) -> Result<Option<AppState>, AppError> {
+        load_versioned(&self.app_state_path()).await
     }
 
-    pub fn save_app_state(&self, state: &AppState) -> Result<(), AppError> {
-        write_atomic(&self.app_state_path(), state)
+    pub async fn save_app_state(&self, state: &AppState) -> Result<(), AppError> {
+        write_atomic(&self.app_state_path(), state).await
     }
 
     // -- Launch list ------------------------------------------------------
 
-    pub fn load_launch_list(&self) -> Result<Option<LaunchListCache>, AppError> {
-        load_versioned(&self.launch_list_path())
+    pub async fn load_launch_list(&self) -> Result<Option<LaunchListCache>, AppError> {
+        load_versioned(&self.launch_list_path()).await
     }
 
-    pub fn save_launch_list(&self, cache: &LaunchListCache) -> Result<(), AppError> {
-        write_atomic(&self.launch_list_path(), cache)
+    pub async fn save_launch_list(&self, cache: &LaunchListCache) -> Result<(), AppError> {
+        write_atomic(&self.launch_list_path(), cache).await
     }
 
     // -- Launch details ---------------------------------------------------
 
-    pub fn load_launch_detail(
+    pub async fn load_launch_detail(
         &self,
         launch_id: &str,
     ) -> Result<Option<LaunchDetailCache>, AppError> {
-        load_versioned(&self.detail_path(launch_id))
+        load_versioned(&self.detail_path(launch_id)).await
     }
 
-    pub fn save_launch_detail(&self, detail: &LaunchDetailCache) -> Result<(), AppError> {
-        write_atomic(&self.detail_path(&detail.launch_id), detail)
+    pub async fn save_launch_detail(&self, detail: &LaunchDetailCache) -> Result<(), AppError> {
+        write_atomic(&self.detail_path(&detail.launch_id), detail).await
     }
 
     // -- Pruning ----------------------------------------------------------
@@ -181,9 +173,9 @@ impl<C: Clock> CacheManager<C> {
     ///    (by `fetched_at`) until within the limit.
     ///
     /// Returns the number of files deleted.
-    pub fn prune_details(&self, config: &CacheConfig) -> Result<u32, AppError> {
+    pub async fn prune_details(&self, config: &CacheConfig) -> Result<u32, AppError> {
         let details_dir = self.details_dir();
-        let entries = match std::fs::read_dir(&details_dir) {
+        let mut entries = match tokio::fs::read_dir(&details_dir).await {
             Ok(rd) => rd,
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(0),
             Err(e) => return Err(AppError::CacheIo(e)),
@@ -196,8 +188,7 @@ impl<C: Clock> CacheManager<C> {
         // Collect surviving files with their fetched_at for count-based pass.
         let mut survivors: Vec<(PathBuf, DateTime<Utc>)> = Vec::new();
 
-        for entry in entries {
-            let entry = entry?;
+        while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
 
             // Skip non-.json files (e.g. leftover .tmp)
@@ -206,12 +197,12 @@ impl<C: Clock> CacheManager<C> {
             }
 
             // Try to read fetched_at from the file.
-            let fetched_at = match read_fetched_at(&path) {
+            let fetched_at = match read_fetched_at(&path).await {
                 Some(ts) => ts,
                 None => {
                     // Corrupt or unreadable — delete it
                     warn!(path = %path.display(), "Deleting unreadable detail cache file");
-                    let _ = std::fs::remove_file(&path);
+                    let _ = tokio::fs::remove_file(&path).await;
                     deleted += 1;
                     continue;
                 }
@@ -224,7 +215,7 @@ impl<C: Clock> CacheManager<C> {
                     age_days = (now - fetched_at).num_days(),
                     "Pruning old detail cache file"
                 );
-                let _ = std::fs::remove_file(&path);
+                let _ = tokio::fs::remove_file(&path).await;
                 deleted += 1;
                 continue;
             }
@@ -240,7 +231,7 @@ impl<C: Clock> CacheManager<C> {
             let to_remove = survivors.len() - max_files;
             for (path, _) in survivors.iter().take(to_remove) {
                 debug!(path = %path.display(), "Pruning excess detail cache file");
-                let _ = std::fs::remove_file(path);
+                let _ = tokio::fs::remove_file(path).await;
                 deleted += 1;
             }
         }
@@ -281,8 +272,8 @@ impl<C: Clock> CacheManager<C> {
 /// - The file does not exist (normal cache miss)
 /// - The file has a version mismatch (logged at DEBUG)
 /// - The file contains invalid JSON (logged at WARN)
-fn load_versioned<T: DeserializeOwned + HasVersion>(path: &Path) -> Result<Option<T>, AppError> {
-    let bytes = match std::fs::read(path) {
+async fn load_versioned<T: DeserializeOwned + HasVersion>(path: &Path) -> Result<Option<T>, AppError> {
+    let bytes = match tokio::fs::read(path).await {
         Ok(b) => b,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
         Err(e) => {
@@ -323,19 +314,19 @@ pub fn should_prune(startup_count: u32, config: &CacheConfig) -> bool {
 /// Read just the `fetched_at` field from a detail cache JSON file.
 ///
 /// Returns `None` if the file can't be read or parsed.
-fn read_fetched_at(path: &Path) -> Option<DateTime<Utc>> {
-    let bytes = std::fs::read(path).ok()?;
+async fn read_fetched_at(path: &Path) -> Option<DateTime<Utc>> {
+    let bytes = tokio::fs::read(path).await.ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let ts_str = value.get("fetched_at")?.as_str()?;
     ts_str.parse::<DateTime<Utc>>().ok()
 }
 
 /// Write data to a file atomically: serialize → write temp → rename.
-fn write_atomic<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
+async fn write_atomic<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
     let json = serde_json::to_string_pretty(data)?;
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, path)?;
+    tokio::fs::write(&tmp, json.as_bytes()).await?;
+    tokio::fs::rename(&tmp, path).await?;
     Ok(())
 }
 
@@ -367,8 +358,8 @@ mod tests {
     use super::*;
     use crate::clock::testing::FakeClock;
     use crate::models::{
-        tests::dummy_launch_detail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
-        PadInfo, Provider, RateLimitState,
+        tests::dummy_launch_detail, ActiveFilters, LaunchStatus, LaunchSummary, LocationInfo,
+        MissionSummary, PadInfo, Provider, RateLimitState,
     };
     use chrono::{TimeDelta, Utc};
     use std::fs;
@@ -412,6 +403,8 @@ mod tests {
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(30),
             total_count: 1,
+            page_offset: 0,
+            active_filters: ActiveFilters::default(),
             launches: vec![LaunchSummary {
                 id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
                 name: "Starship IFT-7".into(),
@@ -453,7 +446,7 @@ mod tests {
             launch_id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(30),
-            ttl_strategy: "short_term".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         }
     }
@@ -466,13 +459,13 @@ mod tests {
     // CacheManager read/write tests (from step 2.1)
     // =====================================================================
 
-    #[test]
-    fn app_state_write_then_read() {
+    #[tokio::test]
+    async fn app_state_write_then_read() {
         let (mgr, _dir, _clock) = setup();
         let state = sample_app_state();
 
-        mgr.save_app_state(&state).unwrap();
-        let loaded = mgr.load_app_state().unwrap().expect("should load");
+        mgr.save_app_state(&state).await.unwrap();
+        let loaded = mgr.load_app_state().await.unwrap().expect("should load");
 
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.startup_count, 42);
@@ -482,13 +475,13 @@ mod tests {
         assert!(loaded.last_prune.is_some());
     }
 
-    #[test]
-    fn launch_list_write_then_read() {
+    #[tokio::test]
+    async fn launch_list_write_then_read() {
         let (mgr, _dir, _clock) = setup();
         let list = sample_launch_list();
 
-        mgr.save_launch_list(&list).unwrap();
-        let loaded = mgr.load_launch_list().unwrap().expect("should load");
+        mgr.save_launch_list(&list).await.unwrap();
+        let loaded = mgr.load_launch_list().await.unwrap().expect("should load");
 
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.total_count, 1);
@@ -497,146 +490,148 @@ mod tests {
         assert_eq!(loaded.launches[0].status.abbrev, "Go");
     }
 
-    #[test]
-    fn launch_detail_write_then_read() {
+    #[tokio::test]
+    async fn launch_detail_write_then_read() {
         let (mgr, _dir, _clock) = setup();
         let detail = sample_launch_detail();
 
-        mgr.save_launch_detail(&detail).unwrap();
+        mgr.save_launch_detail(&detail).await.unwrap();
         let loaded = mgr
             .load_launch_detail("e3df2ecd-c239-472f-95e4-2b89b4f75800")
+            .await
             .unwrap()
             .expect("should load");
 
         assert_eq!(loaded.version, CACHE_VERSION);
         assert_eq!(loaded.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
-        assert_eq!(loaded.ttl_strategy, "short_term");
+        assert_eq!(loaded.ttl_strategy, CacheStrategy::ShortTerm);
         assert_eq!(loaded.data.name, "Starship IFT-7");
     }
 
-    #[test]
-    fn missing_app_state_returns_none() {
+    #[tokio::test]
+    async fn missing_app_state_returns_none() {
         let (mgr, _dir, _clock) = setup();
-        assert!(mgr.load_app_state().unwrap().is_none());
+        assert!(mgr.load_app_state().await.unwrap().is_none());
     }
 
-    #[test]
-    fn missing_launch_list_returns_none() {
+    #[tokio::test]
+    async fn missing_launch_list_returns_none() {
         let (mgr, _dir, _clock) = setup();
-        assert!(mgr.load_launch_list().unwrap().is_none());
+        assert!(mgr.load_launch_list().await.unwrap().is_none());
     }
 
-    #[test]
-    fn missing_launch_detail_returns_none() {
+    #[tokio::test]
+    async fn missing_launch_detail_returns_none() {
         let (mgr, _dir, _clock) = setup();
-        assert!(mgr.load_launch_detail("nonexistent-uuid").unwrap().is_none());
+        assert!(mgr.load_launch_detail("nonexistent-uuid").await.unwrap().is_none());
     }
 
-    #[test]
-    fn corrupt_app_state_returns_none() {
+    #[tokio::test]
+    async fn corrupt_app_state_returns_none() {
         let (mgr, dir, _clock) = setup();
         fs::write(dir.path().join("app_state.json"), "not json {{").unwrap();
-        assert!(mgr.load_app_state().unwrap().is_none());
+        assert!(mgr.load_app_state().await.unwrap().is_none());
     }
 
-    #[test]
-    fn corrupt_launch_list_returns_none() {
+    #[tokio::test]
+    async fn corrupt_launch_list_returns_none() {
         let (mgr, dir, _clock) = setup();
         fs::write(dir.path().join("cache.json"), "definitely not valid").unwrap();
-        assert!(mgr.load_launch_list().unwrap().is_none());
+        assert!(mgr.load_launch_list().await.unwrap().is_none());
     }
 
-    #[test]
-    fn corrupt_launch_detail_returns_none() {
+    #[tokio::test]
+    async fn corrupt_launch_detail_returns_none() {
         let (mgr, dir, _clock) = setup();
         fs::write(dir.path().join("details/some-uuid.json"), "{{garbage").unwrap();
-        assert!(mgr.load_launch_detail("some-uuid").unwrap().is_none());
+        assert!(mgr.load_launch_detail("some-uuid").await.unwrap().is_none());
     }
 
-    #[test]
-    fn app_state_version_mismatch_returns_none() {
+    #[tokio::test]
+    async fn app_state_version_mismatch_returns_none() {
         let (mgr, _dir, _clock) = setup();
         let mut state = sample_app_state();
         state.version = 999;
-        mgr.save_app_state(&state).unwrap();
-        assert!(mgr.load_app_state().unwrap().is_none());
+        mgr.save_app_state(&state).await.unwrap();
+        assert!(mgr.load_app_state().await.unwrap().is_none());
     }
 
-    #[test]
-    fn launch_list_version_mismatch_returns_none() {
+    #[tokio::test]
+    async fn launch_list_version_mismatch_returns_none() {
         let (mgr, _dir, _clock) = setup();
         let mut list = sample_launch_list();
         list.version = 0;
-        mgr.save_launch_list(&list).unwrap();
-        assert!(mgr.load_launch_list().unwrap().is_none());
+        mgr.save_launch_list(&list).await.unwrap();
+        assert!(mgr.load_launch_list().await.unwrap().is_none());
     }
 
-    #[test]
-    fn launch_detail_version_mismatch_returns_none() {
+    #[tokio::test]
+    async fn launch_detail_version_mismatch_returns_none() {
         let (mgr, _dir, _clock) = setup();
         let mut detail = sample_launch_detail();
         detail.version = 42;
-        mgr.save_launch_detail(&detail).unwrap();
+        mgr.save_launch_detail(&detail).await.unwrap();
         assert!(
             mgr.load_launch_detail("e3df2ecd-c239-472f-95e4-2b89b4f75800")
+                .await
                 .unwrap()
                 .is_none()
         );
     }
 
-    #[test]
-    fn atomic_write_does_not_leave_tmp_file() {
+    #[tokio::test]
+    async fn atomic_write_does_not_leave_tmp_file() {
         let (mgr, dir, _clock) = setup();
-        mgr.save_app_state(&sample_app_state()).unwrap();
+        mgr.save_app_state(&sample_app_state()).await.unwrap();
         assert!(!dir.path().join("app_state.tmp").exists());
         assert!(dir.path().join("app_state.json").exists());
     }
 
-    #[test]
-    fn overwrite_preserves_latest_data() {
+    #[tokio::test]
+    async fn overwrite_preserves_latest_data() {
         let (mgr, _dir, _clock) = setup();
         let mut state = sample_app_state();
         state.startup_count = 1;
-        mgr.save_app_state(&state).unwrap();
+        mgr.save_app_state(&state).await.unwrap();
 
         state.startup_count = 99;
-        mgr.save_app_state(&state).unwrap();
+        mgr.save_app_state(&state).await.unwrap();
 
-        let loaded = mgr.load_app_state().unwrap().expect("should load");
+        let loaded = mgr.load_app_state().await.unwrap().expect("should load");
         assert_eq!(loaded.startup_count, 99);
     }
 
-    #[test]
-    fn empty_file_returns_none() {
+    #[tokio::test]
+    async fn empty_file_returns_none() {
         let (mgr, dir, _clock) = setup();
         fs::write(dir.path().join("app_state.json"), "").unwrap();
-        assert!(mgr.load_app_state().unwrap().is_none());
+        assert!(mgr.load_app_state().await.unwrap().is_none());
     }
 
-    #[test]
-    fn valid_json_but_wrong_shape_returns_none() {
+    #[tokio::test]
+    async fn valid_json_but_wrong_shape_returns_none() {
         let (mgr, dir, _clock) = setup();
         fs::write(
             dir.path().join("cache.json"),
             r#"{"some_other": "structure"}"#,
         )
         .unwrap();
-        assert!(mgr.load_launch_list().unwrap().is_none());
+        assert!(mgr.load_launch_list().await.unwrap().is_none());
     }
 
-    #[test]
-    fn detail_files_are_keyed_by_launch_id() {
+    #[tokio::test]
+    async fn detail_files_are_keyed_by_launch_id() {
         let (mgr, dir, _clock) = setup();
         let detail = sample_launch_detail();
-        mgr.save_launch_detail(&detail).unwrap();
+        mgr.save_launch_detail(&detail).await.unwrap();
         let expected = dir
             .path()
             .join("details/e3df2ecd-c239-472f-95e4-2b89b4f75800.json");
         assert!(expected.exists());
     }
 
-    #[test]
-    fn multiple_details_coexist() {
+    #[tokio::test]
+    async fn multiple_details_coexist() {
         let (mgr, _dir, _clock) = setup();
         let mut d1 = sample_launch_detail();
         d1.launch_id = "aaaa-1111".into();
@@ -645,11 +640,11 @@ mod tests {
         d2.launch_id = "bbbb-2222".into();
         d2.data.name = "Falcon 9".into();
 
-        mgr.save_launch_detail(&d1).unwrap();
-        mgr.save_launch_detail(&d2).unwrap();
+        mgr.save_launch_detail(&d1).await.unwrap();
+        mgr.save_launch_detail(&d2).await.unwrap();
 
-        let loaded1 = mgr.load_launch_detail("aaaa-1111").unwrap().expect("d1");
-        let loaded2 = mgr.load_launch_detail("bbbb-2222").unwrap().expect("d2");
+        let loaded1 = mgr.load_launch_detail("aaaa-1111").await.unwrap().expect("d1");
+        let loaded2 = mgr.load_launch_detail("bbbb-2222").await.unwrap().expect("d2");
         assert_eq!(loaded1.data.name, "Starship IFT-7");
         assert_eq!(loaded2.data.name, "Falcon 9");
     }
@@ -908,43 +903,20 @@ mod tests {
 
     #[test]
     fn launch_list_not_stale_before_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        // 29 minutes later — still fresh
-        assert!(!list.is_stale(now + TimeDelta::minutes(29)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(!list.is_stale(base_time() + TimeDelta::minutes(29)));
     }
 
     #[test]
     fn launch_list_stale_at_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        // Exactly at expires_at — stale
-        assert!(list.is_stale(now + TimeDelta::minutes(30)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(list.is_stale(base_time() + TimeDelta::minutes(30)));
     }
 
     #[test]
     fn launch_list_stale_after_expiry() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
-        assert!(list.is_stale(now + TimeDelta::hours(1)));
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
+        assert!(list.is_stale(base_time() + TimeDelta::hours(1)));
     }
 
     #[test]
@@ -955,7 +927,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
-            ttl_strategy: "real_time".into(),
+            ttl_strategy: CacheStrategy::RealTime,
             data: dummy_launch_detail(),
         };
         assert!(!detail.is_stale(now + TimeDelta::seconds(59)));
@@ -969,7 +941,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(1),
-            ttl_strategy: "real_time".into(),
+            ttl_strategy: CacheStrategy::RealTime,
             data: dummy_launch_detail(),
         };
         assert!(detail.is_stale(now + TimeDelta::minutes(1)));
@@ -983,7 +955,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: DateTime::<Utc>::MAX_UTC,
-            ttl_strategy: "permanent".into(),
+            ttl_strategy: CacheStrategy::Permanent,
             data: dummy_launch_detail(),
         };
         // Even far in the future, permanent cache is never stale
@@ -1011,7 +983,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: expires,
-            ttl_strategy: strategy.as_str().into(),
+            ttl_strategy: strategy,
             data: dummy_launch_detail(),
         };
 
@@ -1037,7 +1009,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: expires,
-            ttl_strategy: strategy.as_str().into(),
+            ttl_strategy: strategy,
             data: dummy_launch_detail(),
         };
 
@@ -1057,11 +1029,9 @@ mod tests {
 
         let expires = compute_expires_at(strategy, now, &config);
         let list = LaunchListCache {
-            version: CACHE_VERSION,
             fetched_at: now,
             expires_at: expires,
-            total_count: 0,
-            launches: vec![],
+            ..sample_launch_list()
         };
 
         // Advance clock by 2 hours — still fresh (TTL = 3h)
@@ -1074,16 +1044,23 @@ mod tests {
     }
 
     // =====================================================================
-    // CacheStrategy::as_str tests
+    // CacheStrategy serde tests
     // =====================================================================
 
     #[test]
-    fn strategy_as_str() {
-        assert_eq!(CacheStrategy::Permanent.as_str(), "permanent");
-        assert_eq!(CacheStrategy::LongTerm.as_str(), "long_term");
-        assert_eq!(CacheStrategy::MediumTerm.as_str(), "medium_term");
-        assert_eq!(CacheStrategy::ShortTerm.as_str(), "short_term");
-        assert_eq!(CacheStrategy::RealTime.as_str(), "real_time");
+    fn strategy_serde_round_trip() {
+        for (strategy, expected_str) in [
+            (CacheStrategy::Permanent, "\"permanent\""),
+            (CacheStrategy::LongTerm, "\"long_term\""),
+            (CacheStrategy::MediumTerm, "\"medium_term\""),
+            (CacheStrategy::ShortTerm, "\"short_term\""),
+            (CacheStrategy::RealTime, "\"real_time\""),
+        ] {
+            let json = serde_json::to_string(&strategy).unwrap();
+            assert_eq!(json, expected_str);
+            let deserialized: CacheStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, strategy);
+        }
     }
 
     // =====================================================================
@@ -1091,16 +1068,16 @@ mod tests {
     // =====================================================================
 
     /// Helper: write a detail cache file with a specific fetched_at time.
-    fn write_detail_at(mgr: &CacheManager<FakeClock>, id: &str, fetched_at: DateTime<Utc>) {
+    async fn write_detail_at(mgr: &CacheManager<FakeClock>, id: &str, fetched_at: DateTime<Utc>) {
         let detail = LaunchDetailCache {
             version: CACHE_VERSION,
             launch_id: id.into(),
             fetched_at,
             expires_at: fetched_at + TimeDelta::hours(1),
-            ttl_strategy: "long_term".into(),
+            ttl_strategy: CacheStrategy::LongTerm,
             data: dummy_launch_detail(),
         };
-        mgr.save_launch_detail(&detail).unwrap();
+        mgr.save_launch_detail(&detail).await.unwrap();
     }
 
     // -- should_prune tests -----------------------------------------------
@@ -1132,40 +1109,40 @@ mod tests {
 
     // -- Age-based pruning ------------------------------------------------
 
-    #[test]
-    fn prune_deletes_old_files() {
+    #[tokio::test]
+    async fn prune_deletes_old_files() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let config = default_cache_config(); // max_detail_age_days = 30
 
         // Write one old file (40 days ago) and one fresh file
-        write_detail_at(&mgr, "old-launch", now - TimeDelta::days(40));
-        write_detail_at(&mgr, "fresh-launch", now - TimeDelta::days(1));
+        write_detail_at(&mgr, "old-launch", now - TimeDelta::days(40)).await;
+        write_detail_at(&mgr, "fresh-launch", now - TimeDelta::days(1)).await;
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 1);
 
         // Old file gone, fresh file remains
-        assert!(mgr.load_launch_detail("fresh-launch").unwrap().is_some());
+        assert!(mgr.load_launch_detail("fresh-launch").await.unwrap().is_some());
         assert!(!mgr.detail_path("old-launch").exists());
     }
 
-    #[test]
-    fn prune_keeps_files_at_max_age_boundary() {
+    #[tokio::test]
+    async fn prune_keeps_files_at_max_age_boundary() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let config = default_cache_config(); // max_detail_age_days = 30
 
         // Exactly 30 days old: now - fetched_at == 30 days, not > 30 days
-        write_detail_at(&mgr, "boundary", now - TimeDelta::days(30));
+        write_detail_at(&mgr, "boundary", now - TimeDelta::days(30)).await;
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 0);
         assert!(mgr.detail_path("boundary").exists());
     }
 
-    #[test]
-    fn prune_deletes_just_over_max_age() {
+    #[tokio::test]
+    async fn prune_deletes_just_over_max_age() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let config = default_cache_config();
@@ -1175,16 +1152,16 @@ mod tests {
             &mgr,
             "just-over",
             now - TimeDelta::days(30) - TimeDelta::seconds(1),
-        );
+        ).await;
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 1);
     }
 
     // -- Count-based pruning ----------------------------------------------
 
-    #[test]
-    fn prune_count_based_removes_oldest() {
+    #[tokio::test]
+    async fn prune_count_based_removes_oldest() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let mut config = default_cache_config();
@@ -1196,10 +1173,10 @@ mod tests {
                 &mgr,
                 &format!("launch-{i}"),
                 now - TimeDelta::hours(5 - i), // 0 is oldest, 4 is newest
-            );
+            ).await;
         }
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 2); // 5 - 3 = 2 removed
 
         // Oldest two should be gone
@@ -1211,25 +1188,25 @@ mod tests {
         assert!(mgr.detail_path("launch-4").exists());
     }
 
-    #[test]
-    fn prune_count_at_limit_deletes_nothing() {
+    #[tokio::test]
+    async fn prune_count_at_limit_deletes_nothing() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let mut config = default_cache_config();
         config.max_detail_files = 3;
 
         for i in 0..3 {
-            write_detail_at(&mgr, &format!("launch-{i}"), now - TimeDelta::hours(i));
+            write_detail_at(&mgr, &format!("launch-{i}"), now - TimeDelta::hours(i)).await;
         }
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 0);
     }
 
     // -- Combined age + count pruning -------------------------------------
 
-    #[test]
-    fn prune_age_then_count() {
+    #[tokio::test]
+    async fn prune_age_then_count() {
         let (mgr, _dir, _clock) = setup();
         let now = base_time();
         let mut config = default_cache_config();
@@ -1237,16 +1214,16 @@ mod tests {
         config.max_detail_files = 2;
 
         // 1 old file (deleted by age), 4 recent files (2 deleted by count)
-        write_detail_at(&mgr, "ancient", now - TimeDelta::days(60));
+        write_detail_at(&mgr, "ancient", now - TimeDelta::days(60)).await;
         for i in 0..4 {
             write_detail_at(
                 &mgr,
                 &format!("recent-{i}"),
                 now - TimeDelta::hours(4 - i),
-            );
+            ).await;
         }
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 3); // 1 age + 2 count
 
         // ancient gone (age), recent-0 and recent-1 gone (count)
@@ -1260,73 +1237,73 @@ mod tests {
 
     // -- Edge cases -------------------------------------------------------
 
-    #[test]
-    fn prune_empty_details_dir() {
+    #[tokio::test]
+    async fn prune_empty_details_dir() {
         let (mgr, _dir, _clock) = setup();
         let config = default_cache_config();
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 0);
     }
 
-    #[test]
-    fn prune_missing_details_dir() {
+    #[tokio::test]
+    async fn prune_missing_details_dir() {
         let dir = TempDir::new().unwrap();
         // Don't create the details/ subdirectory
         let clock = FakeClock::new(base_time());
         let mgr = CacheManager::new(dir.path().to_path_buf(), clock);
         let config = default_cache_config();
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 0);
     }
 
-    #[test]
-    fn prune_deletes_corrupt_files() {
+    #[tokio::test]
+    async fn prune_deletes_corrupt_files() {
         let (mgr, dir, _clock) = setup();
         let now = base_time();
         let config = default_cache_config();
 
         // Write one valid file and one corrupt file
-        write_detail_at(&mgr, "valid", now);
+        write_detail_at(&mgr, "valid", now).await;
         fs::write(dir.path().join("details/corrupt.json"), "{{not json").unwrap();
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 1); // corrupt file deleted
 
         assert!(mgr.detail_path("valid").exists());
         assert!(!dir.path().join("details/corrupt.json").exists());
     }
 
-    #[test]
-    fn prune_skips_non_json_files() {
+    #[tokio::test]
+    async fn prune_skips_non_json_files() {
         let (mgr, dir, _clock) = setup();
         let config = default_cache_config();
 
         // Write a .tmp file — should be ignored, not deleted
         fs::write(dir.path().join("details/leftover.tmp"), "temp data").unwrap();
 
-        let deleted = mgr.prune_details(&config).unwrap();
+        let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 0);
         assert!(dir.path().join("details/leftover.tmp").exists());
     }
 
-    #[test]
-    fn prune_with_clock_advancement() {
+    #[tokio::test]
+    async fn prune_with_clock_advancement() {
         let (mgr, _dir, clock) = setup();
         let now = base_time();
         let mut config = default_cache_config();
         config.max_detail_age_days = 10;
 
         // Write files that are currently fresh
-        write_detail_at(&mgr, "will-expire", now);
-        write_detail_at(&mgr, "also-expires", now - TimeDelta::days(1));
+        write_detail_at(&mgr, "will-expire", now).await;
+        write_detail_at(&mgr, "also-expires", now - TimeDelta::days(1)).await;
 
         // No pruning yet — both are within 10 days
-        assert_eq!(mgr.prune_details(&config).unwrap(), 0);
+        assert_eq!(mgr.prune_details(&config).await.unwrap(), 0);
 
         // Advance clock 11 days — both files now exceed max age
         clock.advance(TimeDelta::days(11));
-        assert_eq!(mgr.prune_details(&config).unwrap(), 2);
+        assert_eq!(mgr.prune_details(&config).await.unwrap(), 2);
     }
 
     // =====================================================================
@@ -1335,17 +1312,10 @@ mod tests {
 
     #[test]
     fn clock_backward_jump_stale_cache_handled_correctly() {
-        let now = base_time();
-        let list = LaunchListCache {
-            version: CACHE_VERSION,
-            fetched_at: now,
-            expires_at: now + TimeDelta::minutes(30),
-            total_count: 0,
-            launches: vec![],
-        };
+        let list = sample_launch_list(); // expires_at = base_time() + 30min
         // Clock jumps backward 1 hour — expires_at is now in the future
         // relative to the jumped-back time.
-        let jumped_back = now - TimeDelta::hours(1);
+        let jumped_back = base_time() - TimeDelta::hours(1);
         assert!(!list.is_stale(jumped_back));
     }
 
@@ -1357,7 +1327,7 @@ mod tests {
             launch_id: "test".into(),
             fetched_at: now,
             expires_at: now + TimeDelta::minutes(5),
-            ttl_strategy: "short_term".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         };
         // Clock jumps backward — detail should not be considered stale.

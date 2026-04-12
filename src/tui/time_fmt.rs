@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::config::TimeFormat;
 use crate::models::NetPrecision;
 
 // ---------------------------------------------------------------------------
@@ -137,15 +138,15 @@ pub fn countdown_style(now: DateTime<Utc>, target: DateTime<Utc>) -> Style {
 
 /// Format a UTC datetime as a local-looking time string.
 ///
-/// - `"12h"` → `"10:45 AM"`
-/// - `"24h"` → `"10:45"`
+/// - `TwelveHour` → `"10:45 AM"`
+/// - `TwentyFourHour` → `"10:45"`
 ///
 /// Uses UTC directly (the app doesn't track user timezone — consistent with
 /// dual-timezone display elsewhere).
-pub fn format_time_of_day(time: &DateTime<Utc>, time_format: &str) -> String {
+pub fn format_time_of_day(time: &DateTime<Utc>, time_format: TimeFormat) -> String {
     match time_format {
-        "24h" => time.format("%H:%M").to_string(),
-        _ => time.format("%l:%M %p").to_string().trim_start().to_string(),
+        TimeFormat::TwentyFourHour => time.format("%H:%M").to_string(),
+        TimeFormat::TwelveHour => time.format("%l:%M %p").to_string().trim_start().to_string(),
     }
 }
 
@@ -530,49 +531,42 @@ mod tests {
     #[test]
     fn time_of_day_12h_morning() {
         let t: DateTime<Utc> = "2026-02-28T09:45:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "12h"), "9:45 AM");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwelveHour), "9:45 AM");
     }
 
     #[test]
     fn time_of_day_12h_afternoon() {
         let t: DateTime<Utc> = "2026-02-28T14:30:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "12h"), "2:30 PM");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwelveHour), "2:30 PM");
     }
 
     #[test]
     fn time_of_day_12h_midnight() {
         let t: DateTime<Utc> = "2026-02-28T00:05:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "12h"), "12:05 AM");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwelveHour), "12:05 AM");
     }
 
     #[test]
     fn time_of_day_12h_noon() {
         let t: DateTime<Utc> = "2026-02-28T12:00:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "12h"), "12:00 PM");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwelveHour), "12:00 PM");
     }
 
     #[test]
     fn time_of_day_24h_morning() {
         let t: DateTime<Utc> = "2026-02-28T09:45:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "24h"), "09:45");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwentyFourHour), "09:45");
     }
 
     #[test]
     fn time_of_day_24h_afternoon() {
         let t: DateTime<Utc> = "2026-02-28T14:30:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "24h"), "14:30");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwentyFourHour), "14:30");
     }
 
     #[test]
     fn time_of_day_24h_midnight() {
         let t: DateTime<Utc> = "2026-02-28T00:05:00Z".parse().unwrap();
-        assert_eq!(format_time_of_day(&t, "24h"), "00:05");
-    }
-
-    #[test]
-    fn time_of_day_unknown_format_defaults_to_12h() {
-        let t: DateTime<Utc> = "2026-02-28T14:30:00Z".parse().unwrap();
-        // Unknown format falls through to the 12h branch.
-        assert_eq!(format_time_of_day(&t, "bogus"), "2:30 PM");
+        assert_eq!(format_time_of_day(&t, TimeFormat::TwentyFourHour), "00:05");
     }
 }

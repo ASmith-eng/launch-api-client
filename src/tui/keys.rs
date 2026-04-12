@@ -47,6 +47,18 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
                 app.refresh_requested = true;
             }
         }
+        KeyCode::Char('n') => {
+            // Next page — only if not on the last page and not loading.
+            if !app.loading && app.current_page + 1 < app.total_pages() {
+                navigate_page(app, app.current_page + 1);
+            }
+        }
+        KeyCode::Char('p') => {
+            // Previous page — only if not on the first page and not loading.
+            if !app.loading && app.current_page > 0 {
+                navigate_page(app, app.current_page - 1);
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             if app.selected_index > 0 {
                 app.selected_index -= 1;
@@ -77,6 +89,28 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
             }
         }
         _ => {}
+    }
+}
+
+/// Switch to `target_page`, stashing the current page's data in the
+/// in-memory cache and restoring the target page from it if available.
+///
+/// If the target page is not cached, `launches` is cleared so that
+/// `check_needs_fetch` triggers an API request on the next event loop tick.
+fn navigate_page(app: &mut App, target_page: u32) {
+    // Stash the current page before leaving it (skip if empty — nothing to save).
+    if !app.launches.is_empty() {
+        app.page_cache.insert(app.current_page, app.launches.clone());
+    }
+
+    app.current_page = target_page;
+    app.selected_index = 0;
+    app.list_scroll_offset = 0;
+
+    if let Some(cached) = app.page_cache.get(&target_page) {
+        app.launches = cached.clone();
+    } else {
+        app.launches.clear();
     }
 }
 
@@ -134,9 +168,11 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
             // Apply: promote editing filter to active, clear list to trigger re-fetch.
             if let Some(edited) = app.editing_filter.take() {
                 app.filter_state = edited;
+                app.page_cache.clear();
                 app.launches.clear();
                 app.selected_index = 0;
                 app.list_scroll_offset = 0;
+                app.current_page = 0;
                 app.total_count = 0;
                 app.cache_fetched_at = None;
                 app.cache_expires_at = None;
@@ -158,7 +194,234 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
                 f.cycle_next();
             }
         }
+        KeyCode::Char('x') => {
+            if let Some(ref mut f) = app.editing_filter {
+                f.clear_all();
+            }
+        }
         KeyCode::Char('q') => app.should_quit = true,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn sample_launch(id: &str) -> crate::models::LaunchSummary {
+        use crate::models::*;
+        use chrono::Utc;
+        LaunchSummary {
+            id: id.to_string(),
+            name: "Test".into(),
+            net: Utc::now(),
+            net_precision: None,
+            window_start: None,
+            window_end: None,
+            status: LaunchStatus { id: 1, name: "Go".into(), abbrev: "Go".into() },
+            launch_service_provider: Provider { name: "SpaceX".into(), provider_type: None },
+            pad: PadInfo {
+                name: None,
+                location: LocationInfo {
+                    name: "KSC".into(),
+                    timezone_name: None,
+                    country: None,
+                },
+            },
+            mission: None,
+        }
+    }
+
+    // --- Pagination key tests ---
+
+    #[test]
+    fn next_page_advances_and_clears_launches_when_uncached() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50; // 2 pages at 25 per page
+        app.selected_index = 5;
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1);
+        assert!(app.launches.is_empty()); // page 1 not cached yet — triggers fetch
+        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.list_scroll_offset, 0);
+    }
+
+    #[test]
+    fn next_page_serves_from_cache_when_available() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 0;
+        app.launches = vec![sample_launch("page0")];
+        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1);
+        assert_eq!(app.launches.len(), 1);
+        assert_eq!(app.launches[0].id, "page1-cached");
+    }
+
+    #[test]
+    fn next_page_stashes_current_page_into_cache() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 0;
+        app.launches = vec![sample_launch("page0")];
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert!(app.page_cache.contains_key(&0));
+        assert_eq!(app.page_cache[&0][0].id, "page0");
+    }
+
+    #[test]
+    fn next_page_noop_on_last_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 1; // last page (50/25 = 2 pages, 0-indexed: 0 and 1)
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 1); // unchanged
+        assert!(!app.launches.is_empty()); // not cleared
+    }
+
+    #[test]
+    fn prev_page_goes_back_and_clears_launches_when_uncached() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 75;
+        app.current_page = 2;
+        app.selected_index = 3;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+        assert!(app.launches.is_empty()); // page 1 not cached yet — triggers fetch
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn prev_page_serves_from_cache_when_available() {
+        let mut app = App::new((120, 40));
+        app.total_count = 75;
+        app.current_page = 2;
+        app.launches = vec![sample_launch("page2")];
+        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+        assert_eq!(app.launches.len(), 1);
+        assert_eq!(app.launches[0].id, "page1-cached");
+    }
+
+    #[test]
+    fn prev_page_noop_on_first_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 0);
+        assert!(!app.launches.is_empty());
+    }
+
+    #[test]
+    fn next_page_noop_when_loading() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 50;
+        app.current_page = 0;
+        app.loading = true;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn prev_page_noop_when_loading() {
+        let mut app = App::new((120, 40));
+        app.total_count = 50;
+        app.current_page = 1;
+        app.loading = true;
+
+        handle_key(&mut app, press(KeyCode::Char('p')));
+
+        assert_eq!(app.current_page, 1);
+    }
+
+    #[test]
+    fn next_page_noop_single_page() {
+        let mut app = App::new((120, 40));
+        app.launches = vec![sample_launch("1")];
+        app.total_count = 10; // 10 < 25, only 1 page
+        app.current_page = 0;
+
+        handle_key(&mut app, press(KeyCode::Char('n')));
+
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn filter_apply_resets_page() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        app.editing_filter = Some(crate::tui::filter::FilterState::default());
+        app.current_page = 3;
+
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn filter_clear_all_resets_editing_filter() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        let mut f = crate::tui::filter::FilterState::default();
+        f.status = crate::tui::filter::StatusFilter::GoForLaunch;
+        f.region = crate::tui::filter::RegionFilter::Europe;
+        f.is_crewed = crate::tui::filter::CrewedFilter::CrewedOnly;
+        f.date_range = crate::tui::filter::DateRangeFilter::Next30Days;
+        app.editing_filter = Some(f);
+
+        handle_key(&mut app, press(KeyCode::Char('x')));
+
+        let ef = app.editing_filter.as_ref().unwrap();
+        assert!(!ef.has_active_filters());
+        // Still in filter panel — not applied yet.
+        assert!(matches!(app.screen, AppScreen::FilterPanel));
+    }
+
+    #[test]
+    fn filter_apply_clears_page_cache() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        app.editing_filter = Some(crate::tui::filter::FilterState::default());
+        app.page_cache.insert(0, vec![sample_launch("a")]);
+        app.page_cache.insert(1, vec![sample_launch("b")]);
+
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(app.page_cache.is_empty());
     }
 }

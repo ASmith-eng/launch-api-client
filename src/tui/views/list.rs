@@ -5,7 +5,7 @@
 //! blank separator line.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -14,7 +14,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::styled_block;
+use crate::tui::views::{rate_limit_title, TitleBar};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Height of a single launch item in lines (name + provider + blank separator).
@@ -22,9 +22,8 @@ const ITEM_HEIGHT: usize = 3;
 
 /// Render the full list view into the given area.
 pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
-    // Build the outer block with title and rate limit info.
-    let title = build_title(app);
-    let block = styled_block(&title);
+    // Build the outer block with left title, centered page info, right rate limit.
+    let block = build_title_block(app);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -50,29 +49,46 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     render_hint_bar(frame, hint_area, app);
 }
 
-/// Build the title string: "Launches — Showing N of M" with optional rate limit.
-fn build_title(app: &App) -> String {
-    let filtered = if app.filter_state.has_active_filters() {
-        " [Filtered]"
+/// Build the outer block with three independently aligned title segments:
+/// - Left: " Launches [Filtered]"
+/// - Center: "Showing N of M — Page X of Y"
+/// - Right: "N/M reqs"
+fn build_title_block(app: &App) -> ratatui::widgets::Block<'static> {
+    // Left title: name + optional [Filtered] tag.
+    let left_title = if app.loading {
+        Line::from(Span::raw(" Fetching launches... "))
     } else {
-        ""
-    };
-    let left = if app.loading {
-        " Fetching launches... ".to_string()
-    } else {
-        format!(
-            " Launches{filtered} — Showing {} of {} ",
-            app.launches.len(),
-            app.total_count,
-        )
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(" Launches")];
+        if app.filter_state.has_active_filters() {
+            spans.push(Span::styled(" [Filtered]", Style::default().fg(Color::Cyan)));
+        }
+        spans.push(Span::raw(" "));
+        Line::from(spans)
     };
 
-    match (app.rate_limit_remaining, app.rate_limit_total) {
-        (Some(remaining), Some(total)) => {
-            format!("{left}── {remaining}/{total} reqs ")
-        }
-        _ => left,
+    let mut bar = TitleBar::new(left_title);
+
+    // Center title: page/count info.
+    if !app.loading {
+        let page_info = if app.total_pages() > 1 {
+            format!(
+                " Showing {} of {} — Page {} of {} ",
+                app.launches.len(),
+                app.total_count,
+                app.current_page + 1,
+                app.total_pages(),
+            )
+        } else {
+            format!(" Showing {} of {} ", app.launches.len(), app.total_count)
+        };
+        bar = bar.center(Line::raw(page_info));
     }
+
+    if let Some(rl) = rate_limit_title(app.rate_limit_remaining, app.rate_limit_total) {
+        bar = bar.right(rl);
+    }
+
+    bar.build()
 }
 
 /// Render the scrollable launch items into the given area.
@@ -203,23 +219,50 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let key = style::secondary();
     let desc = style::label();
 
-    let hints = Line::from(vec![
+    // Left group: contextual actions.
+    let mut left_spans: Vec<Span<'static>> = vec![
         Span::styled("  ↑/↓", key),
         Span::styled(": Navigate · ", desc),
         Span::styled("Enter", key),
         Span::styled(": Details · ", desc),
+    ];
+
+    if app.total_pages() > 1 {
+        left_spans.extend([
+            Span::styled("n/p", key),
+            Span::styled(": Page · ", desc),
+        ]);
+    }
+
+    left_spans.extend([
         Span::styled("f", key),
         Span::styled(": Filters · ", desc),
         Span::styled("r", key),
-        Span::styled(": Refresh · ", desc),
+        Span::styled(": Refresh", desc),
+    ]);
+
+    // Right group: meta actions (help, quit).
+    let right_spans = vec![
         Span::styled("?", key),
         Span::styled(": Help · ", desc),
         Span::styled("q", key),
-        Span::styled(": Quit", desc),
-    ]);
+        Span::styled(": Quit  ", desc),
+    ];
 
-    let paragraph = Paragraph::new(vec![status_line, hints]);
-    frame.render_widget(paragraph, area);
+    // Row 0: status line, Row 1: hints (left + right aligned).
+    let status_area = Rect { height: 1, ..area };
+    let hints_area = Rect {
+        y: area.y + 1,
+        height: 1,
+        ..area
+    };
+
+    frame.render_widget(Paragraph::new(status_line), status_area);
+    frame.render_widget(Paragraph::new(Line::from(left_spans)), hints_area);
+    frame.render_widget(
+        Paragraph::new(Line::from(right_spans)).alignment(ratatui::layout::Alignment::Right),
+        hints_area,
+    );
 }
 
 /// Compute the correct scroll offset to keep the selected item visible.
@@ -552,6 +595,91 @@ mod tests {
         assert!(
             text.contains("长征五号") || text.contains("CZ-5"),
             "unicode launch name should render, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_shows_page_indicator() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 75;
+        app.launches_per_page = 25;
+        app.current_page = 1; // page 2 of 3
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("Page 2 of 3"),
+            "title should show page indicator 'Page 2 of 3', got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_title_hides_page_indicator_single_page() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 10;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            !text.contains("Page"),
+            "title should not show page indicator for single page, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_hint_bar_shows_page_nav_when_multipage() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 50;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("n/p"),
+            "hint bar should show 'n/p' for multi-page results, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn render_list_hint_bar_hides_page_nav_single_page() {
+        let mut terminal = make_test_terminal(120, 30);
+        let mut app = App::new((120, 30));
+        app.launches = vec![sample_launch("Launch 1", 1, "Go")];
+        app.total_count = 10;
+        app.launches_per_page = 25;
+
+        terminal
+            .draw(|frame| {
+                render_list(frame, frame.area(), &app);
+            })
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            !text.contains("n/p"),
+            "hint bar should not show 'n/p' for single page, got:\n{text}"
         );
     }
 

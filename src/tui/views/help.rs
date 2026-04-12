@@ -65,6 +65,7 @@ fn build_help_lines(context: HelpContext) -> Vec<Line<'static>> {
             lines.push(key_line("  \u{2191}/\u{2193}       ", "Navigate launch list", key_style, dim));
             lines.push(key_line("  Enter     ", "View launch details", key_style, dim));
             lines.push(key_line("  Home/End  ", "Jump to first/last", key_style, dim));
+            lines.push(key_line("  n/p       ", "Next/previous page", key_style, dim));
             lines.push(Line::raw(""));
             lines.push(Line::from(Span::styled("  Actions", heading)));
             lines.push(key_line("  r         ", "Refresh (when stale)", key_style, dim));

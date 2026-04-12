@@ -2,7 +2,7 @@
 
 use crate::models::{
     CountryInfo, LaunchDetail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
-    NetPrecision, OrbitInfo, PadInfo, Provider, ThrottleStatus, UrlEntry,
+    NetPrecision, OrbitInfo, PadInfo, Probability, Provider, ThrottleStatus, UrlEntry,
 };
 
 use super::response_models::{
@@ -143,7 +143,11 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             window_start: ll2.window_start,
             window_end: ll2.window_end,
             status: ll2.status.into(),
-            probability: ll2.probability,
+            // LL2 API uses -1 for "unknown"; we normalize to Option<Probability>.
+            probability: ll2
+                .probability
+                .and_then(|p| u8::try_from(p).ok())
+                .and_then(Probability::new),
             weather_concerns: ll2.weather_concerns,
             image_url: ll2.image,
             launch_service_provider: Provider {
@@ -410,7 +414,7 @@ mod tests {
         assert_eq!(detail.id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
         assert_eq!(detail.name, "Starship IFT-7");
         assert_eq!(detail.status.id, 1);
-        assert_eq!(detail.probability, Some(90));
+        assert_eq!(detail.probability, Probability::new(90));
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
         assert_eq!(
             detail.image_url.as_deref(),

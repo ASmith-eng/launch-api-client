@@ -1126,6 +1126,20 @@ updates in real-time without requiring user input.
 **Acceptance criteria:** With the detail view open for an upcoming launch,
 the countdown visibly decrements each second without any key presses.
 
+**Status:** Complete. 397 tests still passing (no new tests — this step is
+purely wiring as noted). Changes:
+
+- `src/tui/event.rs` — Added `tokio::time::interval(1s)` with
+  `MissedTickBehavior::Skip` to avoid redraw bursts after slow frames.
+  New `tick.tick()` branch in `tokio::select!` with a
+  `matches!(app.screen, AppScreen::Detail(_))` guard so the tick only
+  triggers re-renders on the Detail screen. On other screens the interval
+  accumulates silently. No state mutation needed — the countdown is computed
+  at render time from the launch's `net` field, so a re-render is sufficient.
+  Imported `AppScreen`, `Duration`, `interval`, `MissedTickBehavior`.
+
+clippy clean (only pre-existing dead-code warnings from later-phase items).
+
 ---
 
 ### Step 9.2 — Pagination navigation
@@ -1153,6 +1167,31 @@ pagination (10/25/50 items)"; §Primary Endpoints — `?limit=` and `?offset=`
 **Acceptance criteria:** User can navigate between pages of results.
 `n` on the last page and `p` on the first page are no-ops. Page indicator
 updates correctly.
+
+**Status:** Complete. 20 new tests (417 total). Changes:
+
+- `src/tui/app.rs` — Added `current_page: u32` field (zero-indexed,
+  displayed as 1-indexed). `total_pages()` method with ceiling division
+  (returns at least 1). `page_offset()` computes API offset. 8 new tests
+  for total_pages (zero count, exact multiple, remainder, fewer than page
+  size, single item) and page_offset (pages 0/1/2).
+- `src/tui/keys.rs` — `n` key: increments `current_page` if not on last
+  page and not loading, clears launches/selection/scroll to trigger re-fetch.
+  `p` key: decrements `current_page` if not on first page and not loading,
+  same state clearing. Filter apply (Enter in FilterPanel) now resets
+  `current_page` to 0. 8 new key handler tests: next/prev advance/go-back,
+  noop on last/first page, noop when loading, noop on single page, filter
+  apply resets page.
+- `src/tui/fetch.rs` — `spawn_fetch()` now passes `app.page_offset()` as
+  the `offset` field in `ListParams`.
+- `src/tui/views/list.rs` — Title shows "Page X of Y" when `total_pages()
+  > 1`, hidden for single-page results. Hint bar conditionally shows
+  `n/p: Page` when multiple pages exist. 4 new rendering tests: page
+  indicator shown/hidden, hint bar n/p shown/hidden.
+- `src/tui/views/help.rs` — Added `n/p` → "Next/previous page" to list
+  help navigation section.
+
+clippy clean (only pre-existing warnings from earlier phases).
 
 ---
 

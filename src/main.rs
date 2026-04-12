@@ -22,6 +22,7 @@ use vendor::launch_library_2::endpoints::PROD_BASE_URL;
 use models::{AppState, CACHE_VERSION};
 use tui::app::App;
 use tui::event::run_event_loop;
+use tui::filter::FilterState;
 use tui::terminal::{install_panic_hook, setup_terminal};
 
 #[tokio::main]
@@ -60,6 +61,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app_state = cache_manager
         .load_app_state()
+        .await
         .unwrap_or_else(|e| {
             warn!(error = %e, "failed to load app_state.json, using defaults");
             None
@@ -90,7 +92,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "running cache pruning (startup #{})",
             app_state.startup_count
         );
-        if let Err(e) = cache_manager.prune_details(&config.cache) {
+        if let Err(e) = cache_manager.prune_details(&config.cache).await {
             warn!(error = %e, "cache pruning failed");
         }
         app_state.last_prune = Some(Utc::now());
@@ -119,28 +121,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 6. Load launch list from cache.
-    let cached_list = cache_manager.load_launch_list().unwrap_or_else(|e| {
+    let cached_list = cache_manager.load_launch_list().await.unwrap_or_else(|e| {
         warn!(error = %e, "failed to load cache.json");
         None
     });
-
-    let needs_refresh = match cached_list {
-        Some(ref cache) if !cache.is_stale(clock.now()) => {
-            info!(
-                count = cache.launches.len(),
-                "loaded fresh launch list from cache"
-            );
-            false
-        }
-        Some(_) => {
-            info!("cached launch list is stale, will re-fetch");
-            true
-        }
-        None => {
-            info!("no cached launch list, will fetch");
-            false // Empty list triggers auto-fetch via event loop state check.
-        }
-    };
 
     // 7. Set up terminal and TUI.
     install_panic_hook();
@@ -149,23 +133,62 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let size = terminal.size()?;
     let mut app = App::new((size.width, size.height));
 
-    // Populate app with cached data (if any).
-    if let Some(ref cache) = cached_list {
-        app.launches = cache.launches.clone();
-        app.total_count = cache.total_count;
-        app.cache_fetched_at = Some(cache.fetched_at);
-        app.cache_expires_at = Some(cache.expires_at);
-    }
-
     // Populate rate limit display from current limiter state.
     {
-        let mut limiter = api_client.rate_limiter();
+        let mut limiter = api_client.rate_limiter().await;
         app.rate_limit_remaining = Some(limiter.remaining() as u32);
         app.rate_limit_total = Some(limiter.limit() as u32);
     }
 
+    // Set launches_per_page before restoring cache so page derivation uses
+    // the configured value, not the App::new default.
     app.ui_config = config.ui.clone();
     app.launches_per_page = config.ui.launches_per_page;
+
+    // Restore session state from cache (if any).
+    //
+    // Fresh cache  → restore page position, cached data, and filter state.
+    //                No API request needed.
+    // Stale cache  → restore filter state only; reset to page 1 so the
+    //                re-fetch starts from the beginning with the right filters.
+    // No cache     → start from scratch; event loop auto-fetches page 1.
+    let needs_refresh = match cached_list {
+        Some(ref cache) if !cache.is_stale(clock.now()) => {
+            // Derive the page the cache represents. If launches_per_page has
+            // changed since the cache was written the offset won't divide
+            // evenly — fall back to page 0 in that case.
+            let restored_page = if app.launches_per_page > 0
+                && cache.page_offset % app.launches_per_page == 0
+            {
+                cache.page_offset / app.launches_per_page
+            } else {
+                0
+            };
+
+            info!(
+                count = cache.launches.len(),
+                page = restored_page + 1,
+                "loaded fresh launch list from cache"
+            );
+
+            app.launches = cache.launches.clone();
+            app.total_count = cache.total_count;
+            app.cache_fetched_at = Some(cache.fetched_at);
+            app.cache_expires_at = Some(cache.expires_at);
+            app.current_page = restored_page;
+            app.filter_state = FilterState::from_active_filters(&cache.active_filters);
+            false
+        }
+        Some(ref cache) => {
+            info!("cached launch list is stale, will re-fetch from page 1");
+            app.filter_state = FilterState::from_active_filters(&cache.active_filters);
+            true
+        }
+        None => {
+            info!("no cached launch list, will fetch");
+            false // Empty launches triggers auto-fetch via event loop state check.
+        }
+    };
 
     // If cache is stale, signal the event loop to refresh on first iteration.
     if needs_refresh {
@@ -184,11 +207,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // 9. Save app state on exit, including current rate limit state.
     {
-        let limiter = api_client.rate_limiter();
+        let limiter = api_client.rate_limiter().await;
         app_state.rate_limit = limiter.to_state();
     }
     app_state.last_startup = Utc::now();
-    if let Err(e) = cache_manager.save_app_state(&app_state) {
+    if let Err(e) = cache_manager.save_app_state(&app_state).await {
         warn!(error = %e, "failed to save app_state.json on exit");
     }
 

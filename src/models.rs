@@ -1,5 +1,54 @@
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::cache::CacheStrategy;
+
+/// Launch probability as a percentage (0–100).
+///
+/// Constructed via `Probability::new` or `TryFrom<u8>`, which reject values
+/// above 100. This prevents impossible states from propagating through the
+/// UI rendering code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct Probability(u8);
+
+impl Probability {
+    /// Create a new `Probability`, returning `None` if `value > 100`.
+    pub fn new(value: u8) -> Option<Self> {
+        if value <= 100 {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the inner percentage value.
+    pub fn value(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for Probability {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or_else(|| format!("probability {value} exceeds 100%"))
+    }
+}
+
+impl From<Probability> for u8 {
+    fn from(p: Probability) -> Self {
+        p.0
+    }
+}
+
+impl fmt::Display for Probability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}%", self.0)
+    }
+}
 
 /// Summary of a launch for use in the list view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +140,7 @@ pub struct LaunchDetail {
     pub window_start: Option<DateTime<Utc>>,
     pub window_end: Option<DateTime<Utc>>,
     pub status: LaunchStatus,
-    pub probability: Option<i32>,
+    pub probability: Option<Probability>,
     pub weather_concerns: Option<String>,
     pub image_url: Option<String>,
     // Provider
@@ -134,6 +183,14 @@ pub struct LaunchListCache {
     pub expires_at: DateTime<Utc>,
     pub total_count: u32,
     pub launches: Vec<LaunchSummary>,
+    /// API offset of the page this cache represents (`current_page * launches_per_page`).
+    /// Defaults to 0 for caches written before this field was introduced.
+    #[serde(default)]
+    pub page_offset: u32,
+    /// Filter selections active when this cache was written.
+    /// Defaults to all-unfiltered for caches written before this field was introduced.
+    #[serde(default)]
+    pub active_filters: ActiveFilters,
 }
 
 impl LaunchListCache {
@@ -150,7 +207,7 @@ pub struct LaunchDetailCache {
     pub launch_id: String,
     pub fetched_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub ttl_strategy: String,
+    pub ttl_strategy: CacheStrategy,
     pub data: LaunchDetail,
 }
 
@@ -182,6 +239,69 @@ pub struct RateLimitState {
 
 /// Current cache version. Bumped when the cache format changes.
 pub const CACHE_VERSION: u32 = 1;
+
+// ---------------------------------------------------------------------------
+// Filter snapshot types (persisted in cache.json)
+// ---------------------------------------------------------------------------
+
+/// Launch status filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum StatusFilter {
+    #[default]
+    All,
+    GoForLaunch,
+    Tbd,
+    Tbc,
+    OnHold,
+    InFlight,
+}
+
+/// Geographical region filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RegionFilter {
+    #[default]
+    All,
+    US,
+    Europe,
+    RussiaKazakhstan,
+    China,
+    India,
+    Japan,
+    NewZealand,
+}
+
+/// Crewed mission filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CrewedFilter {
+    #[default]
+    All,
+    CrewedOnly,
+    UncrewedOnly,
+}
+
+/// Date range filter — persisted as part of [`ActiveFilters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DateRangeFilter {
+    #[default]
+    All,
+    Next7Days,
+    Next30Days,
+    Next90Days,
+}
+
+/// Snapshot of active filter selections, stored alongside the cached launch
+/// list so filter context can be restored across sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ActiveFilters {
+    #[serde(default)]
+    pub status: StatusFilter,
+    #[serde(default)]
+    pub region: RegionFilter,
+    #[serde(default)]
+    pub is_crewed: CrewedFilter,
+    #[serde(default)]
+    pub date_range: DateRangeFilter,
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -262,10 +382,42 @@ pub(crate) mod tests {
         assert_eq!(cache.launches.len(), 1);
         assert_eq!(cache.launches[0].name, "Starship IFT-7");
         assert_eq!(cache.launches[0].status.abbrev, "Go");
+        // Old-format JSON without new fields should default gracefully.
+        assert_eq!(cache.page_offset, 0);
+        assert_eq!(cache.active_filters.status, StatusFilter::All);
+        assert_eq!(cache.active_filters.region, RegionFilter::All);
+        assert_eq!(cache.active_filters.is_crewed, CrewedFilter::All);
+        assert_eq!(cache.active_filters.date_range, DateRangeFilter::All);
 
         let serialized = serde_json::to_string(&cache).unwrap();
         let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.launches[0].id, cache.launches[0].id);
+    }
+
+    #[test]
+    fn launch_list_cache_page_offset_and_filters_round_trip() {
+        let cache = LaunchListCache {
+            version: 1,
+            fetched_at: "2026-04-08T10:00:00Z".parse().unwrap(),
+            expires_at: "2026-04-08T10:30:00Z".parse().unwrap(),
+            total_count: 75,
+            launches: vec![],
+            page_offset: 25,
+            active_filters: ActiveFilters {
+                status: StatusFilter::GoForLaunch,
+                region: RegionFilter::US,
+                is_crewed: CrewedFilter::CrewedOnly,
+                date_range: DateRangeFilter::Next30Days,
+            },
+        };
+
+        let serialized = serde_json::to_string(&cache).unwrap();
+        let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.page_offset, 25);
+        assert_eq!(deserialized.active_filters.status, StatusFilter::GoForLaunch);
+        assert_eq!(deserialized.active_filters.region, RegionFilter::US);
+        assert_eq!(deserialized.active_filters.is_crewed, CrewedFilter::CrewedOnly);
+        assert_eq!(deserialized.active_filters.date_range, DateRangeFilter::Next30Days);
     }
 
     /// Round-trip test for `details/{uuid}.json`.
@@ -276,13 +428,13 @@ pub(crate) mod tests {
             launch_id: "e3df2ecd-c239-472f-95e4-2b89b4f75800".into(),
             fetched_at: "2026-02-22T10:20:00Z".parse().unwrap(),
             expires_at: "2026-02-22T10:25:00Z".parse().unwrap(),
-            ttl_strategy: "imminent".into(),
+            ttl_strategy: CacheStrategy::ShortTerm,
             data: dummy_launch_detail(),
         };
 
         assert_eq!(cache.version, 1);
         assert_eq!(cache.launch_id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
-        assert_eq!(cache.ttl_strategy, "imminent");
+        assert_eq!(cache.ttl_strategy, CacheStrategy::ShortTerm);
         assert_eq!(cache.data.name, "Starship IFT-7");
 
         let serialized = serde_json::to_string(&cache).unwrap();

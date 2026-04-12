@@ -11,8 +11,9 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
 use crate::tui::filter::FilterState;
 
-/// Height of the filter panel overlay (top border + categories + hints + bottom border).
-const PANEL_HEIGHT: u16 = 4;
+/// Height of the filter panel overlay
+/// (top border + pad + categories + pad + hints + bottom border).
+const PANEL_HEIGHT: u16 = 6;
 
 /// Render the filter panel overlay near the top of the given area.
 pub fn render_filter_panel(frame: &mut ratatui::Frame, area: Rect, filter: &FilterState) {
@@ -41,25 +42,31 @@ pub fn render_filter_panel(frame: &mut ratatui::Frame, area: Rect, filter: &Filt
     frame.render_widget(Clear, panel_area);
     frame.render_widget(block, panel_area);
 
-    // Line 1: filter categories with values.
+    // Row 0: blank padding.
+    // Row 1: filter categories with values.
     let categories_line = build_categories_line(filter);
     frame.render_widget(
         Paragraph::new(categories_line),
-        Rect {
-            height: 1,
-            ..inner
-        },
-    );
-
-    // Line 2: key hints.
-    let hints_line = build_hints_line();
-    frame.render_widget(
-        Paragraph::new(hints_line),
         Rect {
             y: inner.y + 1,
             height: 1,
             ..inner
         },
+    );
+
+    // Row 2: blank padding.
+    // Row 3: key hints — left group (editing) and right group (apply/cancel).
+    let hints_rect = Rect {
+        y: inner.y + 3,
+        height: 1,
+        ..inner
+    };
+    let left_hints = build_hints_left();
+    let right_hints = build_hints_right();
+    frame.render_widget(Paragraph::new(left_hints), hints_rect);
+    frame.render_widget(
+        Paragraph::new(right_hints).alignment(ratatui::layout::Alignment::Right),
+        hints_rect,
     );
 }
 
@@ -99,18 +106,26 @@ fn build_categories_line(filter: &FilterState) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Build the hints line for the filter panel.
-fn build_hints_line() -> Line<'static> {
+/// Build the left-aligned hints (editing actions).
+fn build_hints_left() -> Line<'static> {
     Line::from(vec![
         Span::raw(" "),
         Span::styled("Tab", Style::default().fg(Color::White)),
         Span::styled(": Next \u{00B7} ", Style::default().fg(Color::DarkGray)),
         Span::styled("\u{2190}/\u{2192}", Style::default().fg(Color::White)),
         Span::styled(": Change \u{00B7} ", Style::default().fg(Color::DarkGray)),
+        Span::styled("x", Style::default().fg(Color::White)),
+        Span::styled(": Clear All", Style::default().fg(Color::DarkGray)),
+    ])
+}
+
+/// Build the right-aligned hints (confirm/cancel).
+fn build_hints_right() -> Line<'static> {
+    Line::from(vec![
         Span::styled("Enter", Style::default().fg(Color::White)),
         Span::styled(": Apply \u{00B7} ", Style::default().fg(Color::DarkGray)),
         Span::styled("Esc", Style::default().fg(Color::White)),
-        Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
+        Span::styled(": Cancel ", Style::default().fg(Color::DarkGray)),
     ])
 }
 
@@ -166,11 +181,24 @@ mod tests {
     }
 
     #[test]
-    fn hints_line_contains_all_keys() {
-        let line = build_hints_line();
+    fn hints_left_contains_editing_keys() {
+        let line = build_hints_left();
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("Tab"));
+        assert!(text.contains("Change"));
+        assert!(text.contains("Clear All"));
+        // Confirm/cancel should NOT be in the left group.
+        assert!(!text.contains("Enter"));
+        assert!(!text.contains("Esc"));
+    }
+
+    #[test]
+    fn hints_right_contains_confirm_cancel_keys() {
+        let line = build_hints_right();
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("Enter"));
+        assert!(text.contains("Apply"));
         assert!(text.contains("Esc"));
+        assert!(text.contains("Cancel"));
     }
 }

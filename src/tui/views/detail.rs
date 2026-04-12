@@ -16,7 +16,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::styled_block;
+use crate::tui::views::{rate_limit_title, TitleBar};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Width threshold below which we switch from two-column to single-column.
@@ -30,8 +30,7 @@ const RECORD_BAR_WIDTH: usize = 20;
 /// If the launch ID is found in `app.detail_cache`, renders the full
 /// detail. Otherwise renders a loading/not-found placeholder.
 pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, app: &App) {
-    let title = build_title(launch_id, app);
-    let block = styled_block(&title);
+    let block = build_title_block(launch_id, app);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -78,21 +77,20 @@ pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, ap
 // Title
 // ---------------------------------------------------------------------------
 
-fn build_title(launch_id: &str, app: &App) -> String {
+fn build_title_block(launch_id: &str, app: &App) -> ratatui::widgets::Block<'static> {
     let name = app
         .detail_cache
         .get(launch_id)
-        .map(|c| c.data.name.as_str())
-        .unwrap_or(launch_id);
+        .map(|c| c.data.name.clone())
+        .unwrap_or_else(|| launch_id.to_string());
 
-    let left = format!(" {name} ");
+    let mut bar = TitleBar::new(Line::raw(format!(" {name} ")));
 
-    match (app.rate_limit_remaining, app.rate_limit_total) {
-        (Some(remaining), Some(total)) => {
-            format!("{left}── {remaining}/{total} reqs ")
-        }
-        _ => left,
+    if let Some(rl) = rate_limit_title(app.rate_limit_remaining, app.rate_limit_total) {
+        bar = bar.right(rl);
     }
+
+    bar.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +174,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
 
     // Window + probability line (if any data present).
     let has_window = detail.window_start.is_some() && detail.window_end.is_some();
-    let has_probability = detail.probability.is_some_and(|p| p >= 0);
+    let has_probability = detail.probability.is_some();
 
     if has_window || has_probability {
         let mut spans: Vec<Span<'static>> = Vec::new();
@@ -195,13 +193,11 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
         }
 
         if let Some(prob) = detail.probability {
-            if prob >= 0 {
-                spans.push(Span::styled("Probability: ", style::label()));
-                spans.push(Span::styled(
-                    format!("{prob}%"),
-                    style::probability_style(Some(prob)),
-                ));
-            }
+            spans.push(Span::styled("Probability: ", style::label()));
+            spans.push(Span::styled(
+                format!("{prob}"),
+                style::probability_style(Some(prob)),
+            ));
         }
 
         lines.push(Line::from(spans).centered());
@@ -636,21 +632,38 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let key = style::secondary();
     let desc = style::label();
 
-    let hints = Line::from(vec![
+    // Left group: contextual actions.
+    let left_hints = Line::from(vec![
         Span::styled("  Esc", key),
         Span::styled(": Back · ", desc),
         Span::styled("↑/↓", key),
         Span::styled(": Scroll · ", desc),
         Span::styled("r", key),
-        Span::styled(": Refresh · ", desc),
+        Span::styled(": Refresh", desc),
+    ]);
+
+    // Right group: meta actions (help, quit).
+    let right_hints = Line::from(vec![
         Span::styled("?", key),
         Span::styled(": Help · ", desc),
         Span::styled("q", key),
-        Span::styled(": Quit", desc),
+        Span::styled(": Quit  ", desc),
     ]);
 
-    let paragraph = Paragraph::new(vec![status_line, hints]);
-    frame.render_widget(paragraph, area);
+    // Row 0: status line, Row 1: hints (left + right aligned).
+    let status_area = Rect { height: 1, ..area };
+    let hints_area = Rect {
+        y: area.y + 1,
+        height: 1,
+        ..area
+    };
+
+    frame.render_widget(Paragraph::new(status_line), status_area);
+    frame.render_widget(Paragraph::new(left_hints), hints_area);
+    frame.render_widget(
+        Paragraph::new(right_hints).alignment(ratatui::layout::Alignment::Right),
+        hints_area,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -660,9 +673,11 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::CacheStrategy;
     use crate::models::tests::dummy_launch_detail;
     use crate::models::{
-        LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Provider, UrlEntry,
+        LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Probability, Provider,
+        UrlEntry,
     };
 
     /// Build a richly populated detail for testing.
@@ -684,7 +699,7 @@ mod tests {
                 country: None,
             },
         };
-        d.probability = Some(90);
+        d.probability = Probability::new(90);
         d.weather_concerns = Some("No concerns".into());
         d.mission = Some(MissionSummary {
             name: "Starship IFT-7".into(),
@@ -783,7 +798,7 @@ mod tests {
     #[test]
     fn probability_high_renders_green() {
         let mut detail = rich_detail();
-        detail.probability = Some(90);
+        detail.probability = Probability::new(90);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("90%"))
@@ -795,7 +810,7 @@ mod tests {
     #[test]
     fn probability_medium_renders_yellow() {
         let mut detail = rich_detail();
-        detail.probability = Some(60);
+        detail.probability = Probability::new(60);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("60%"))
@@ -807,7 +822,7 @@ mod tests {
     #[test]
     fn probability_low_renders_red() {
         let mut detail = rich_detail();
-        detail.probability = Some(30);
+        detail.probability = Probability::new(30);
         let lines = build_content_lines(&detail, 120);
         let prob_line = lines.iter().find(|l| {
             l.spans.iter().any(|s| s.content.contains("30%"))
@@ -1009,9 +1024,9 @@ mod tests {
     }
 
     #[test]
-    fn probability_negative_is_hidden() {
+    fn probability_none_is_hidden() {
         let mut detail = rich_detail();
-        detail.probability = Some(-1);
+        detail.probability = None;
         let lines = build_content_lines(&detail, 120);
 
         let text: String = lines
@@ -1127,7 +1142,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );
@@ -1160,7 +1175,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );
@@ -1192,7 +1207,7 @@ mod tests {
                 launch_id: launch_id.clone(),
                 fetched_at: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
-                ttl_strategy: "short_term".into(),
+                ttl_strategy: CacheStrategy::ShortTerm,
                 data: detail,
             },
         );
