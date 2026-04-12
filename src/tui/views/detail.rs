@@ -16,7 +16,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::styled_block;
+use crate::tui::views::{rate_limit_title, TitleBar};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Width threshold below which we switch from two-column to single-column.
@@ -30,8 +30,7 @@ const RECORD_BAR_WIDTH: usize = 20;
 /// If the launch ID is found in `app.detail_cache`, renders the full
 /// detail. Otherwise renders a loading/not-found placeholder.
 pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, app: &App) {
-    let title = build_title(launch_id, app);
-    let block = styled_block(&title);
+    let block = build_title_block(launch_id, app);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -78,21 +77,20 @@ pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, ap
 // Title
 // ---------------------------------------------------------------------------
 
-fn build_title(launch_id: &str, app: &App) -> String {
+fn build_title_block(launch_id: &str, app: &App) -> ratatui::widgets::Block<'static> {
     let name = app
         .detail_cache
         .get(launch_id)
-        .map(|c| c.data.name.as_str())
-        .unwrap_or(launch_id);
+        .map(|c| c.data.name.clone())
+        .unwrap_or_else(|| launch_id.to_string());
 
-    let left = format!(" {name} ");
+    let mut bar = TitleBar::new(Line::raw(format!(" {name} ")));
 
-    match (app.rate_limit_remaining, app.rate_limit_total) {
-        (Some(remaining), Some(total)) => {
-            format!("{left}── {remaining}/{total} reqs ")
-        }
-        _ => left,
+    if let Some(rl) = rate_limit_title(app.rate_limit_remaining, app.rate_limit_total) {
+        bar = bar.right(rl);
     }
+
+    bar.build()
 }
 
 // ---------------------------------------------------------------------------
@@ -634,21 +632,38 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let key = style::secondary();
     let desc = style::label();
 
-    let hints = Line::from(vec![
+    // Left group: contextual actions.
+    let left_hints = Line::from(vec![
         Span::styled("  Esc", key),
         Span::styled(": Back · ", desc),
         Span::styled("↑/↓", key),
         Span::styled(": Scroll · ", desc),
         Span::styled("r", key),
-        Span::styled(": Refresh · ", desc),
+        Span::styled(": Refresh", desc),
+    ]);
+
+    // Right group: meta actions (help, quit).
+    let right_hints = Line::from(vec![
         Span::styled("?", key),
         Span::styled(": Help · ", desc),
         Span::styled("q", key),
-        Span::styled(": Quit", desc),
+        Span::styled(": Quit  ", desc),
     ]);
 
-    let paragraph = Paragraph::new(vec![status_line, hints]);
-    frame.render_widget(paragraph, area);
+    // Row 0: status line, Row 1: hints (left + right aligned).
+    let status_area = Rect { height: 1, ..area };
+    let hints_area = Rect {
+        y: area.y + 1,
+        height: 1,
+        ..area
+    };
+
+    frame.render_widget(Paragraph::new(status_line), status_area);
+    frame.render_widget(Paragraph::new(left_hints), hints_area);
+    frame.render_widget(
+        Paragraph::new(right_hints).alignment(ratatui::layout::Alignment::Right),
+        hints_area,
+    );
 }
 
 // ---------------------------------------------------------------------------

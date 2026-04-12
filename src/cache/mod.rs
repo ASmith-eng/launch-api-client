@@ -358,8 +358,8 @@ mod tests {
     use super::*;
     use crate::clock::testing::FakeClock;
     use crate::models::{
-        tests::dummy_launch_detail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
-        PadInfo, Provider, RateLimitState,
+        tests::dummy_launch_detail, ActiveFilters, LaunchStatus, LaunchSummary, LocationInfo,
+        MissionSummary, PadInfo, Provider, RateLimitState,
     };
     use chrono::{TimeDelta, Utc};
     use std::fs;

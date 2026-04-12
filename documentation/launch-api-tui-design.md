@@ -1,5 +1,32 @@
 # Launch Client TUI - Design Document
 
+## Contents
+
+> Use line numbers to jump directly to a section (e.g. `offset: 40, limit: 30`).
+
+| Lines | Section | What you'll find here |
+|------:|---------|----------------------|
+| 29–33 | [Project Overview](#project-overview) | One-paragraph summary of the app |
+| 35–55 | [Technology Stack](#technology-stack) | Crates and dependencies |
+| 57–83 | [Source Code Organisation](#source-code-organisation) | Directory layout, vendor config module boundaries |
+| 85–123 | [API Integration](#api-integration) | LL2 endpoints, query params, filters, pagination, response modes |
+| 125–202 | [API Rate Limiting](#api-rate-limiting) | Rate limit constraints, rolling window strategy, throttle sync |
+| 204–375 | [Caching Strategy](#caching-strategy) | File structure, cache files, TTL tiers, lazy loading, pruning |
+| 377–734 | [User Interface Design](#user-interface-design) | Min terminal size, borders, layout (list/detail/help), UI components, colours, time display, keybindings, MVP features |
+| 736–808 | [User Configuration](#user-configuration) | `config.toml` schema, timezone, log level, API key, defaults |
+| 810–895 | [Error Handling](#error-handling) | `AppError` enum, error categories, retry logic, UI behaviour |
+| 897–1020 | [Application Architecture](#application-architecture) | State machine, screens, async event loop, graceful shutdown, first-run |
+| 1022–1090 | [Application Flow](#application-flow) | Startup sequence, user interaction flow diagrams |
+| 1092–1186 | [Data Models](#data-models) | Core structs (`CacheManager`, `App`, `Launch`, `LaunchDetail`, etc.) |
+| 1188–1208 | [Logging](#logging) | `tracing` config, log file location, what gets logged |
+| 1210–1242 | [Success Criteria](#success-criteria) | MVP completeness checklist, quality criteria |
+| 1244–1260 | [Future Enhancements](#future-enhancements-post-mvp) | Post-MVP feature ideas |
+| 1262–1346 | [Implementation Notes](#implementation-notes) | Development phases, testing strategy (unit/integration/edge/manual) |
+| 1348–1465 | [Cross-Cutting Dependencies](#cross-cutting-dependencies) | What to check and re-test when changing a feature — maps shared state and logic between subsystems |
+| 1467–1474 | [References](#references) | Links to LL2 docs, ratatui, tokio, crossterm, tracing |
+
+---
+
 ## Project Overview
 
 A Rust-based terminal UI application for browsing upcoming and ongoing space missions using the Launch Library 2 API. The application emphasizes efficient API usage through intelligent caching and provides users with real-time mission information in an easy-to-use terminal interface.
@@ -552,7 +579,7 @@ The help overlay is context-aware, showing different content depending on the cu
 
 #### Filter Panel
 
-A centered overlay panel rendered on top of the list view. Users press `f` to open the filter panel, then use `Tab` to cycle between filter categories and `left`/`right` to change values within a category. Pressing `Enter` applies the selected filters and triggers an API request. Pressing `Esc` cancels filter changes. The overlay uses rounded Cyan borders and is positioned near the top of the screen.
+A centered overlay panel rendered on top of the list view. Users press `f` to open the filter panel, then use `Tab` to cycle between filter categories and `left`/`right` to change values within a category. Pressing `Enter` applies the selected filters and triggers an API request. Pressing `x` resets all filter categories to their defaults ("All"). Pressing `Esc` cancels filter changes. The overlay uses rounded Cyan borders and is positioned near the top of the screen.
 
 **Filter categories**:
 - **Status**: All, Go for Launch, TBD, TBC, On Hold, In Flight (maps to `status__ids` API parameter)
@@ -676,6 +703,7 @@ r         - Refresh current view (only when cache is stale)
 f         - Focus filter panel (list view only)
 Tab       - Cycle filter categories (when filter panel focused)
 ←/→       - Change filter value (when filter panel focused)
+x         - Clear all filters (when filter panel focused)
 Home/End  - Jump to first/last item in list
 ?         - Show help overlay (context-aware)
 ```
@@ -1316,6 +1344,125 @@ Logging uses the `tracing` crate (the Rust ecosystem standard, integrates well w
 - Offline behavior (no network, partial network)
 - Terminal resize (below minimum, resize during use, responsive layout threshold at 100 columns)
 - First run with no config/cache directories
+
+---
+
+## Cross-Cutting Dependencies
+
+Many features in this application share state or logic. Changing one area can
+silently break another. Use the map below to identify what else to check and
+re-test when working on a specific feature.
+
+### If you are changing…
+
+**Clock abstraction or time handling**
+→ The `Clock` trait is injected into both `RateLimiter` and `CacheManager`. A
+change to clock behavior or the `FakeClock` test helper affects rate limit
+window calculations (§API Rate Limiting) AND cache TTL expiry checks
+(§Caching Strategy). Re-run both sets of unit tests.
+
+**Rate limiter logic**
+→ The rate limiter gates ALL API requests — list fetches, detail fetches,
+filter requests, throttle syncs, and startup sync. It is also persisted to
+`app_state.json` (§Caching Strategy › Cache Files) and restored on startup
+(§Application Flow › Startup Sequence). Changes here affect: whether the
+refresh key is enabled (§UI Components › Staleness Indicators), the
+`RateLimited` error state that disables the refresh key (§Error Handling),
+the `reqs` counter in the title bar (§UI Components › Status Bar), and
+graceful shutdown which must flush rate limit state (§Graceful Shutdown).
+
+**Cache TTL tiers or expiry logic**
+→ TTL tiers are proximity-based and depend on launch status AND `net` time
+(§Cache Expiry). The same expiry check drives: whether the refresh key is
+enabled (§Staleness Indicators), the "stale" label and "Updated Xm ago"
+text in the status bar (§UI Components › Status Bar), and when the app
+decides to make API requests (§Request Strategy). TTL values are also
+user-configurable in `config.toml` (§User Configuration) and pass through
+defensive sanitisation (§Configuration Behavior). Changes to TTL logic
+should be tested with both default and user-configured values.
+
+**API response parsing or vendor response models**
+→ The vendor response models (`response_models.rs`) are deserialized into
+both `LaunchSummary` (list view) and `LaunchDetailCache` (detail view).
+Field changes ripple into: time display formatting via `net_precision`
+(§Time Display), countdown visibility which is suppressed for coarse
+precision (§Countdown Timer), cache TTL strategy selection which reads
+launch status (§Cache Expiry), status badge rendering which reads
+`status.id` (§Launch Status Colors), and the filter panel which maps
+status IDs and region IDs from vendor config (§Filter Panel).
+
+**Status ID mappings (`status_map.rs`)**
+→ Status IDs are used in: list view badge color and text (§Launch Status
+Colors), detail view hero header badge color (§Detail View), countdown
+color tiers which use status to detect in-flight (§Countdown Styling),
+filter panel status options (§Filter Panel), and cache TTL strategy which
+treats in-flight status as `RealTime` tier (§Cache Expiry).
+
+**Region mappings (`region_map.rs`)**
+→ The region-to-`pad__location` ID mapping is used by the filter panel
+(§Filter Panel) to construct API query parameters. Changes here affect
+filter API requests (§API Integration › Primary Endpoints) and must stay
+in sync with the LL2 API's location IDs.
+
+**Filter panel or filter state**
+→ Applying filters triggers a server-side API request (§Filter Panel),
+which consumes rate limit budget (§Rate Limiter). Filters reset the list
+view to page 1 and clear the current selection index. Filter parameters
+are constructed from vendor mappings — status IDs (§`status_map.rs`) and
+region IDs (§`region_map.rs`). Filters are NOT persisted between sessions
+and are NOT applied client-side, so pagination state (§Features MVP) must
+also reset when filters change.
+
+**`net_precision` handling**
+→ `net_precision` controls three independent behaviours: time display format
+in both list and detail views — hour precision shows full datetime, month
+shows "Mar 2026", etc. (§Time Display › Net Precision Awareness); countdown
+visibility — countdown is hidden for month/year precision (§Countdown
+Timer); and dual timezone display — coarse precision skips the timezone
+portion (§Dual Timezone Format).
+
+**Config parsing or `config.toml` schema**
+→ All config values pass through `Config::sanitize()` (§Defensive
+Sanitisation) before use. Config feeds into: cache TTL values
+(§Cache Expiry), cache pruning thresholds (§Cache Pruning), pagination
+page size which maps to the API `?limit=` parameter (§API Integration),
+time format in the status bar (§Status Bar), log level (§Logging), and
+API key presence which doubles the rate limit (§Rate Limit Constraints).
+A new config field needs a sanitisation rule, a default value, and a
+serde attribute.
+
+**Error handling or `ErrorState` enum**
+→ `ErrorState` variants drive distinct UI behaviours (§Error Categories
+and UI Behaviour): `Transient` shows inline errors and auto-dismisses;
+`RateLimited` disables the refresh key and shows a countdown;
+`Offline` adds the `[OFFLINE]` indicator to the status bar. Error
+classification (`is_retryable()`) determines whether the single
+automatic retry fires (§Network/API Errors). Changes to error variants
+must update both the classification logic and the rendering paths.
+
+**Pagination or `launches_per_page`**
+→ Page size maps directly to the API `?limit=` parameter (§API
+Integration). It affects: the "Showing N of M" display in the list
+view title bar (§List View), scroll and selection state, and API
+request frequency since smaller pages mean more requests to browse
+the full list. The value is user-configurable (§User Configuration)
+and sanitised to 1–100 (§Defensive Sanitisation).
+
+**Terminal size or resize handling**
+→ Terminal size is checked every event loop iteration (§Async Event Loop).
+Below 80x24, a warning replaces all content but the event loop still
+processes quit and resize events (§Minimum Terminal Size). The detail
+view switches between two-column and single-column layout at the 100
+column threshold (§Detail View). Resize events trigger an immediate
+re-render (§Minimum Terminal Size).
+
+**Graceful shutdown**
+→ Shutdown must: persist rate limiter state to `app_state.json`, flush
+pending cache writes, and restore the terminal via `TerminalGuard`'s
+`Drop` impl (§Graceful Shutdown). The RAII guard covers both normal
+exits and panics. If you add new persistent state, it needs to be
+saved here. If you change how `app_state.json` is structured, the
+startup sequence that loads it must also be updated (§Startup Sequence).
 
 ---
 

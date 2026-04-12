@@ -253,6 +253,14 @@ impl FilterState {
         self.active_category = (self.active_category + 1) % NUM_FILTER_CATEGORIES;
     }
 
+    /// Reset all filter categories to their defaults.
+    pub fn clear_all(&mut self) {
+        self.status = StatusFilter::default();
+        self.region = RegionFilter::default();
+        self.is_crewed = CrewedFilter::default();
+        self.date_range = DateRangeFilter::default();
+    }
+
     /// Whether any filter is active (non-default).
     pub fn has_active_filters(&self) -> bool {
         !self.status.is_default()
@@ -481,6 +489,31 @@ mod tests {
     }
 
     // --- FilterState ---
+
+    #[test]
+    fn clear_all_resets_every_category_to_default() {
+        let mut f = FilterState {
+            active_category: 2,
+            status: StatusFilter::GoForLaunch,
+            region: RegionFilter::Europe,
+            is_crewed: CrewedFilter::CrewedOnly,
+            date_range: DateRangeFilter::Next30Days,
+        };
+        f.clear_all();
+        assert!(f.status.is_default());
+        assert!(f.region.is_default());
+        assert!(f.is_crewed.is_default());
+        assert!(f.date_range.is_default());
+        // active_category is preserved — only values are cleared.
+        assert_eq!(f.active_category, 2);
+    }
+
+    #[test]
+    fn clear_all_on_default_state_is_noop() {
+        let mut f = FilterState::default();
+        f.clear_all();
+        assert!(!f.has_active_filters());
+    }
 
     #[test]
     fn filter_state_default_has_no_active_filters() {

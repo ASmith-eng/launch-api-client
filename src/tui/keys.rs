@@ -194,6 +194,11 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) {
                 f.cycle_next();
             }
         }
+        KeyCode::Char('x') => {
+            if let Some(ref mut f) = app.editing_filter {
+                f.clear_all();
+            }
+        }
         KeyCode::Char('q') => app.should_quit = true,
         _ => {}
     }
@@ -386,6 +391,25 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Enter));
 
         assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn filter_clear_all_resets_editing_filter() {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::FilterPanel;
+        let mut f = crate::tui::filter::FilterState::default();
+        f.status = crate::tui::filter::StatusFilter::GoForLaunch;
+        f.region = crate::tui::filter::RegionFilter::Europe;
+        f.is_crewed = crate::tui::filter::CrewedFilter::CrewedOnly;
+        f.date_range = crate::tui::filter::DateRangeFilter::Next30Days;
+        app.editing_filter = Some(f);
+
+        handle_key(&mut app, press(KeyCode::Char('x')));
+
+        let ef = app.editing_filter.as_ref().unwrap();
+        assert!(!ef.has_active_filters());
+        // Still in filter panel — not applied yet.
+        assert!(matches!(app.screen, AppScreen::FilterPanel));
     }
 
     #[test]
