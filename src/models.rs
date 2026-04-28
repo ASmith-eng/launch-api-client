@@ -143,15 +143,63 @@ pub struct LaunchDetail {
     pub probability: Option<Probability>,
     pub weather_concerns: Option<String>,
     pub image_url: Option<String>,
+    /// Failure reason text from the API (set on failed launches).
+    #[serde(default)]
+    pub failreason: Option<String>,
+    /// Status updates posted to the launch (most recent first).
+    #[serde(default)]
+    pub updates: Vec<LaunchUpdate>,
+    /// Crew assigned to the launch (empty for uncrewed missions).
+    #[serde(default)]
+    pub crew: Vec<CrewMember>,
+    /// Recoverable stage landing entries (one per launcher stage).
+    #[serde(default)]
+    pub landings: Vec<StageLanding>,
     // Provider
     pub launch_service_provider: Provider,
     pub provider_total_launches: Option<u32>,
     pub provider_successful_launches: Option<u32>,
     pub provider_failed_launches: Option<u32>,
+    #[serde(default)]
+    pub provider_country_code: Option<String>,
+    #[serde(default)]
+    pub provider_founding_year: Option<u32>,
+    #[serde(default)]
+    pub provider_consecutive_successes: Option<u32>,
     // Vehicle
     pub rocket_full_name: Option<String>,
+    #[serde(default)]
+    pub rocket_variant: Option<String>,
+    /// Stored for future use — not currently rendered.
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub rocket_description: Option<String>,
+    #[serde(default)]
+    pub rocket_length: Option<f64>,
+    #[serde(default)]
+    pub rocket_diameter: Option<f64>,
+    #[serde(default)]
+    pub rocket_launch_mass: Option<f64>,
+    #[serde(default)]
+    pub rocket_leo_capacity: Option<f64>,
+    #[serde(default)]
+    pub rocket_gto_capacity: Option<f64>,
+    #[serde(default)]
+    pub rocket_thrust: Option<f64>,
+    #[serde(default)]
+    pub rocket_maiden_flight: Option<String>,
+    #[serde(default)]
+    pub rocket_total_launches: Option<u32>,
+    #[serde(default)]
+    pub rocket_successful_launches: Option<u32>,
+    #[serde(default)]
+    pub rocket_failed_launches: Option<u32>,
+    #[serde(default)]
+    pub rocket_consecutive_successes: Option<u32>,
     // Location
     pub pad: PadInfo,
+    #[serde(default)]
+    pub pad_total_launch_count: Option<u32>,
     // Mission
     pub mission: Option<MissionSummary>,
     // Links
@@ -159,6 +207,32 @@ pub struct LaunchDetail {
     pub info_urls: Vec<UrlEntry>,
     // Programs
     pub programs: Vec<String>,
+}
+
+/// A status update posted to a launch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchUpdate {
+    pub comment: String,
+    pub created_on: DateTime<Utc>,
+    pub info_url: Option<String>,
+}
+
+/// A crew member assigned to a launch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrewMember {
+    pub name: String,
+    pub role: String,
+    pub agency: String,
+}
+
+/// Landing information for a single recoverable stage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageLanding {
+    pub stage_type: Option<String>,
+    pub landing_attempt: bool,
+    pub landing_success: Option<bool>,
+    pub landing_type: Option<String>,
+    pub landing_location: Option<String>,
 }
 
 /// A URL entry from the API (webcast link, info link, etc.).
@@ -238,7 +312,7 @@ pub struct RateLimitState {
 }
 
 /// Current cache version. Bumped when the cache format changes.
-pub const CACHE_VERSION: u32 = 1;
+pub const CACHE_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Filter snapshot types (persisted in cache.json)
@@ -460,6 +534,10 @@ pub(crate) mod tests {
             probability: None,
             weather_concerns: None,
             image_url: None,
+            failreason: None,
+            updates: vec![],
+            crew: vec![],
+            landings: vec![],
             launch_service_provider: Provider {
                 name: "SpaceX".into(),
                 provider_type: None,
@@ -467,7 +545,23 @@ pub(crate) mod tests {
             provider_total_launches: None,
             provider_successful_launches: None,
             provider_failed_launches: None,
+            provider_country_code: None,
+            provider_founding_year: None,
+            provider_consecutive_successes: None,
             rocket_full_name: None,
+            rocket_variant: None,
+            rocket_description: None,
+            rocket_length: None,
+            rocket_diameter: None,
+            rocket_launch_mass: None,
+            rocket_leo_capacity: None,
+            rocket_gto_capacity: None,
+            rocket_thrust: None,
+            rocket_maiden_flight: None,
+            rocket_total_launches: None,
+            rocket_successful_launches: None,
+            rocket_failed_launches: None,
+            rocket_consecutive_successes: None,
             pad: PadInfo {
                 name: None,
                 location: LocationInfo {
@@ -476,10 +570,65 @@ pub(crate) mod tests {
                     country: None,
                 },
             },
+            pad_total_launch_count: None,
             mission: None,
             vid_urls: vec![],
             info_urls: vec![],
             programs: vec![],
         }
+    }
+
+    /// An old-format `LaunchDetail` JSON blob (pre-Step 1) must deserialize
+    /// cleanly: all new fields default to `None`/empty so the version check
+    /// can reject the cache without a serde error.
+    #[test]
+    fn launch_detail_deserializes_with_missing_new_fields() {
+        let json = r#"{
+            "id": "abc",
+            "name": "Old Cache Launch",
+            "net": "2026-01-01T00:00:00Z",
+            "net_precision": null,
+            "window_start": null,
+            "window_end": null,
+            "status": { "id": 1, "name": "Go for Launch", "abbrev": "Go" },
+            "probability": null,
+            "weather_concerns": null,
+            "image_url": null,
+            "launch_service_provider": { "name": "SpaceX", "provider_type": null },
+            "provider_total_launches": null,
+            "provider_successful_launches": null,
+            "provider_failed_launches": null,
+            "rocket_full_name": null,
+            "pad": {
+                "name": null,
+                "location": {
+                    "name": "Starbase",
+                    "timezone_name": null,
+                    "country": null
+                }
+            },
+            "mission": null,
+            "vid_urls": [],
+            "info_urls": [],
+            "programs": []
+        }"#;
+
+        let detail: LaunchDetail = serde_json::from_str(json).expect("deserialize old format");
+        assert_eq!(detail.name, "Old Cache Launch");
+        assert!(detail.failreason.is_none());
+        assert!(detail.updates.is_empty());
+        assert!(detail.crew.is_empty());
+        assert!(detail.landings.is_empty());
+        assert!(detail.rocket_variant.is_none());
+        assert!(detail.rocket_description.is_none());
+        assert!(detail.rocket_length.is_none());
+        assert!(detail.rocket_thrust.is_none());
+        assert!(detail.rocket_maiden_flight.is_none());
+        assert!(detail.rocket_total_launches.is_none());
+        assert!(detail.rocket_consecutive_successes.is_none());
+        assert!(detail.provider_country_code.is_none());
+        assert!(detail.provider_founding_year.is_none());
+        assert!(detail.provider_consecutive_successes.is_none());
+        assert!(detail.pad_total_launch_count.is_none());
     }
 }

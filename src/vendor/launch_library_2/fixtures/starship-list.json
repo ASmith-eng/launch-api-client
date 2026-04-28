@@ -1,0 +1,47 @@
+{
+    "count": 147,
+    "next": "https://lldev.thespacedevs.com/2.3.0/launches/upcoming/?limit=10&offset=10",
+    "previous": null,
+    "results": [
+        {
+            "id": "e3df2ecd-c239-472f-95e4-2b89b4f75800",
+            "name": "Starship IFT-7",
+            "net": "2026-02-28T09:00:00Z",
+            "net_precision": {
+                "id": 1,
+                "name": "Day",
+                "abbrev": "Day"
+            },
+            "window_start": "2026-02-28T09:00:00Z",
+            "window_end": "2026-02-28T12:00:00Z",
+            "status": {
+                "id": 1,
+                "name": "Go for Launch",
+                "abbrev": "Go",
+                "description": "Current launch date is a go."
+            },
+            "launch_service_provider": {
+                "name": "SpaceX",
+                "type": "Commercial"
+            },
+            "pad": {
+                "name": "Orbital Launch Mount A",
+                "location": {
+                    "name": "Starbase, Texas",
+                    "timezone_name": "America/Chicago",
+                    "country_code": "US"
+                }
+            },
+            "mission": {
+                "name": "Starship IFT-7",
+                "type": "Test Flight",
+                "description": "Seventh integrated flight test of the Starship system.",
+                "orbit": {
+                    "id": 8,
+                    "name": "Low Earth Orbit",
+                    "abbrev": "LEO"
+                }
+            }
+        }
+    ]
+}

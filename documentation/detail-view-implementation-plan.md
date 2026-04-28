@@ -66,7 +66,13 @@ These conventions apply to all steps and are not repeated in each one.
 
 ---
 
-## Step 0 — Prerequisite fix: top-level URL field names
+## Step 0 — Prerequisite fix: top-level URL field names ✅ Complete
+
+**Implementation notes:**
+- `Ll2LaunchDetail::vid_urls` / `info_urls` switched from `#[serde(rename = "...URLs")]` to `#[serde(alias = "...URLs", default)]`. Canonical key is now snake_case (matches v2.3.0); legacy camelCase still deserializes.
+- `SAMPLE_DETAIL_JSON` updated to v2.3.0 snake_case.
+- New test `deserialize_launch_detail_accepts_legacy_camelcase_url_fields` covers backward compatibility with v2.2.0 / older cached payloads.
+- `cargo test` passes (434 tests).
 
 During API verification we discovered that the LL2 v2.3.0 API returns
 top-level URL arrays as `vid_urls` and `info_urls` (snake_case), but the
@@ -99,11 +105,20 @@ preferred source) are being silently dropped.
 
 ---
 
-## Step 1 — Domain model expansion
+## Step 1 — Domain model expansion ✅ Complete
 
 Add all new domain types and fields to `models.rs`. This step touches no
 rendering or API code — it only defines the shapes and updates the test
 helper.
+
+**Implementation notes:**
+- `LaunchUpdate`, `CrewMember`, `StageLanding` added with `#[derive(Debug, Clone, Serialize, Deserialize)]`.
+- All 21 new fields added to `LaunchDetail` with `#[serde(default)]`.
+- `rocket_description` annotated `#[allow(dead_code)]`.
+- `CACHE_VERSION` bumped to `2`.
+- `dummy_launch_detail()` updated; `From<Ll2LaunchDetail>` impl in `convert.rs` set new fields to `None`/empty defaults (Step 3 will populate them).
+- New test `launch_detail_deserializes_with_missing_new_fields` covers the old-cache scenario.
+- `cargo check` clean; all 433 tests pass.
 
 ### New types
 
@@ -192,10 +207,19 @@ with `#[allow(dead_code)]`.
 
 ---
 
-## Step 2 — LL2 response models
+## Step 2 — LL2 response models ✅ Complete
 
-Add serde-annotated structs to `response_models.rs` for the new API fields
-we need to deserialize.
+**Implementation notes:**
+- 11 new structs added: `Ll2LaunchUpdate`, `Ll2LauncherStage`, `Ll2Landing`, `Ll2LandingType`, `Ll2LandingLocation`, `Ll2SpacecraftStage`, `Ll2CrewEntry`, `Ll2Role`, `Ll2Astronaut`, `Ll2AstronautAgency`. The plan listed `Ll2Country` separately but the existing struct was reused — `alpha_3_code: Option<String>` was added with `#[serde(default)]` so pad-level country (no alpha_3) and provider-level country (alpha_3 present) both deserialize.
+- `Ll2LauncherStage::stage_type` and `Ll2Landing::landing_type` use `#[serde(rename = "type")]` to dodge the keyword.
+- `Ll2LaunchDetail` extended with `failreason` + `updates`; `Ll2ProviderDetail` with `country`/`founding_year`/`consecutive_successful_launches`; `Ll2Rocket` with `launcher_stage`/`spacecraft_stage`; `Ll2RocketConfiguration` with all 13 spec fields; `Ll2Pad` with `total_launch_count`. All new fields use `#[serde(default)]`.
+- All five `Ll2Pad`/`Ll2LaunchDetail` test fixtures in `convert.rs` updated for the new fields (Step 3 will populate them from the conversion logic).
+- Three new tests against fixture samples: `deserialize_falcon9_sample_detail`, `deserialize_soyuz_crewed_sample_detail`, `deserialize_launch_detail_tolerates_missing_step2_fields`.
+218 +- **Test fixtures convention:** sample API JSON for this vendor lives in `src/vendor/launch_library_2/fixtures/` and is exposed as named `&'static str` constants by `fixtures.rs` (e.g. `fixtures::FALCON9_DETAIL`)
++. The previous inline `SAMPLE_LIST_JSON` / `SAMPLE_DETAIL_JSON` constants were migrated to this layout, so all LL2 sample payloads are centralised in one place. When the API version bumps, drop a fresh capture in
++to `fixtures/` and tests pick up the new shape automatically.
+- **Test fixtures convention:** sample API JSON for this vendor lives in `src/vendor/launch_library_2/fixtures/` and is exposed as named `&'static str` constants by `fixtures.rs` (e.g. `fixtures::FALCON9_DETAIL`). The previous inline `SAMPLE_LIST_JSON` / `SAMPLE_DETAIL_JSON` constants were migrated to this layout, so all LL2 sample payloads are centralised in one place. When the API version bumps, drop a fresh capture into `fixtures/` and tests pick up the new shape automatically.
+- 437 tests pass (+3 new). Build emits dead-code warnings for the new fields — these will resolve in Step 3 when the conversion layer reads them.
 
 ### New structs
 

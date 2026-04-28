@@ -163,6 +163,27 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             vid_urls,
             info_urls,
             programs,
+            failreason: None,
+            updates: vec![],
+            crew: vec![],
+            landings: vec![],
+            provider_country_code: None,
+            provider_founding_year: None,
+            provider_consecutive_successes: None,
+            rocket_variant: None,
+            rocket_description: None,
+            rocket_length: None,
+            rocket_diameter: None,
+            rocket_launch_mass: None,
+            rocket_leo_capacity: None,
+            rocket_gto_capacity: None,
+            rocket_thrust: None,
+            rocket_maiden_flight: None,
+            rocket_total_launches: None,
+            rocket_successful_launches: None,
+            rocket_failed_launches: None,
+            rocket_consecutive_successes: None,
+            pad_total_launch_count: None,
         }
     }
 }
@@ -240,8 +261,10 @@ mod tests {
                     country: Some(Ll2Country {
                         name: "United States of America".into(),
                         alpha_2_code: "US".into(),
+                        alpha_3_code: None,
                     }),
                 },
+                total_launch_count: None,
             },
             mission: Some(Ll2Mission {
                 name: "Starship IFT-7".into(),
@@ -308,6 +331,7 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
         };
@@ -362,12 +386,30 @@ mod tests {
                 total_launch_count: Some(301),
                 successful_launches: Some(295),
                 failed_launches: Some(6),
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: Some(Ll2Rocket {
                 configuration: Some(Ll2RocketConfiguration {
                     full_name: Some("Starship (Super Heavy + Starship)".into()),
                     name: Some("Starship".into()),
+                    variant: None,
+                    description: None,
+                    length: None,
+                    diameter: None,
+                    launch_mass: None,
+                    leo_capacity: None,
+                    gto_capacity: None,
+                    to_thrust: None,
+                    maiden_flight: None,
+                    total_launch_count: None,
+                    successful_launches: None,
+                    failed_launches: None,
+                    consecutive_successful_launches: None,
                 }),
+                launcher_stage: vec![],
+                spacecraft_stage: vec![],
             }),
             pad: Ll2Pad {
                 name: Some("Orbital Launch Mount A".into()),
@@ -377,8 +419,10 @@ mod tests {
                     country: Some(Ll2Country {
                         name: "United States of America".into(),
                         alpha_2_code: "US".into(),
+                        alpha_3_code: None,
                     }),
                 },
+                total_launch_count: None,
             },
             mission: Some(Ll2MissionDetail {
                 name: "Starship IFT-7".into(),
@@ -403,6 +447,8 @@ mod tests {
                 title: Some("SpaceX Info".into()),
                 url: "https://spacex.com/ift7".into(),
             }],
+            failreason: None,
+            updates: vec![],
         }
     }
 
@@ -457,6 +503,9 @@ mod tests {
                 total_launch_count: None,
                 successful_launches: None,
                 failed_launches: None,
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: None,
             pad: Ll2Pad {
@@ -466,11 +515,14 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
             program: vec![],
             vid_urls: vec![],
             info_urls: vec![],
+            failreason: None,
+            updates: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();
@@ -507,12 +559,30 @@ mod tests {
                 total_launch_count: None,
                 successful_launches: None,
                 failed_launches: None,
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: Some(Ll2Rocket {
                 configuration: Some(Ll2RocketConfiguration {
                     full_name: None,
                     name: Some("Falcon 9".into()),
+                    variant: None,
+                    description: None,
+                    length: None,
+                    diameter: None,
+                    launch_mass: None,
+                    leo_capacity: None,
+                    gto_capacity: None,
+                    to_thrust: None,
+                    maiden_flight: None,
+                    total_launch_count: None,
+                    successful_launches: None,
+                    failed_launches: None,
+                    consecutive_successful_launches: None,
                 }),
+                launcher_stage: vec![],
+                spacecraft_stage: vec![],
             }),
             pad: Ll2Pad {
                 name: None,
@@ -521,11 +591,14 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
             program: vec![],
             vid_urls: vec![],
             info_urls: vec![],
+            failreason: None,
+            updates: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();
