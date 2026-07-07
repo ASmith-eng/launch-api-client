@@ -288,7 +288,7 @@ pub struct Ll2Rocket {
 }
 
 /// Rocket configuration details.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Ll2RocketConfiguration {
     #[serde(default)]
     pub full_name: Option<String>,

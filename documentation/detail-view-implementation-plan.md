@@ -317,7 +317,16 @@ the reference files are moved or deleted.
 
 ---
 
-## Step 3 — Conversion layer
+## Step 3 — Conversion layer ✅ Complete
+
+**Implementation notes:**
+- `From<Ll2LaunchDetail>` now populates all 21 new fields (previously hardcoded to `None`/`vec![]` placeholders from Step 1).
+- Added a module-private `non_empty()` helper (`""` → `None`), applied to `failreason` and `rocket_variant`.
+- Three element-level `From` impls added: `Ll2LaunchUpdate → LaunchUpdate`, `Ll2CrewEntry → CrewMember` (agency `abbrev` preferred, falls back to `name`; graceful empty-string defaults when astronaut/role absent), `Ll2LauncherStage → StageLanding`.
+- The rocket is unpacked once into `(config, launcher_stages, spacecraft_stages)`; crew is taken from the first `spacecraft_stage`, `provider_country_code` from `country[0].alpha_3_code`, and `pad_total_launch_count` is read before `pad` is moved into `Self`.
+- **Deviation:** added `#[derive(Default)]` to `Ll2RocketConfiguration` (all fields are `Option`) to enable a clean `unwrap_or_default()` unpack in the conversion.
+- **Deviation:** the full/crew conversion tests exercise the real `FALCON9_DETAIL` / `SOYUZ_CREWED_DETAIL` fixtures rather than a hand-built `Ll2LaunchDetail` — stronger coverage of the same intent the plan described.
+- `cargo test` passes (441 tests: +4 new, +1 extended). Clippy clean on the changed files (`convert.rs`, `response_models.rs`).
 
 Extend the `From<Ll2LaunchDetail> for LaunchDetail` impl in `convert.rs`
 to populate the new domain model fields from the LL2 response models.
@@ -389,7 +398,15 @@ Use this for `failreason` and `rocket_variant`.
 
 ---
 
-## Step 4 — Hero section: fail reason
+## Step 4 — Hero section: fail reason ✅ Complete
+
+**Implementation notes:**
+- Added a fail-reason block to `build_hero_section()` in `detail.rs`, directly below the weather-concerns block and mirroring its structure: a styled `"Failure: "` prefix (`style::label()`) followed by word-wrapped, centered reason text.
+- Added a semantic `style::warning()` helper (Red — the palette's documented "Failure" colour) rather than inlining a colour, consistent with the style module's stated purpose. The reason text uses it.
+- Kept an `!reason.is_empty()` guard mirroring the weather block for safety, even though Step 3 conversion already normalises `""` → `None`.
+- **Renders live immediately** — unlike Steps 5–8, no Step 9 wiring is needed because the hero section is always part of `build_content_lines()`. Any failed launch's detail view now shows the reason.
+- Tests: `hero_shows_fail_reason_when_present` (text + red styling), `hero_omits_fail_reason_when_absent`, `hero_wraps_long_fail_reason` (multi-line wrap), plus `style::warning_is_red`.
+- `cargo test` passes (445 tests, +4). Clippy clean on `detail.rs` / `style.rs`.
 
 Add the fail reason display to the hero section of the detail view.
 

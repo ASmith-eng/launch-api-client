@@ -227,6 +227,32 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
         }
     }
 
+    // Fail reason — shown below weather on a failed launch, wrapped to width
+    // and styled as a warning. (Conversion normalises "" to None already;
+    // the emptiness guard mirrors the weather block for safety.)
+    if let Some(reason) = &detail.failreason {
+        if !reason.is_empty() {
+            let prefix = "Failure: ";
+            let wrap_width = (width as usize).saturating_sub(prefix.len() + 4);
+            let wrapped = word_wrap(reason, wrap_width);
+            for (i, line) in wrapped.into_iter().enumerate() {
+                if i == 0 {
+                    lines.push(
+                        Line::from(vec![
+                            Span::styled(prefix, style::label()),
+                            Span::styled(line, style::warning()),
+                        ])
+                        .centered(),
+                    );
+                } else {
+                    lines.push(
+                        Line::from(Span::styled(line, style::warning())).centered(),
+                    );
+                }
+            }
+        }
+    }
+
     lines.push(Line::raw(""));
 }
 
@@ -791,6 +817,60 @@ mod tests {
         // With 0 success, the failure span should be first styled span with ░.
         let fail_span = bar.spans.iter().find(|s| s.content.contains('░')).unwrap();
         assert_eq!(fail_span.style.fg, Some(Color::Red));
+    }
+
+    // ── Hero fail reason ──────────────────────────────────────────────
+
+    #[test]
+    fn hero_shows_fail_reason_when_present() {
+        let mut detail = dummy_launch_detail();
+        detail.failreason = Some("Second stage engine failed to ignite.".into());
+        let mut lines = Vec::new();
+        build_hero_section(&mut lines, &detail, 100);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Failure: "));
+        assert!(text.contains("Second stage engine failed to ignite."));
+
+        // Reason text carries the warning (red) colour.
+        let has_red = lines.iter().any(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.content.contains("Second stage") && s.style.fg == Some(Color::Red))
+        });
+        assert!(has_red, "fail reason should use the warning colour");
+    }
+
+    #[test]
+    fn hero_omits_fail_reason_when_absent() {
+        let mut detail = dummy_launch_detail();
+        detail.failreason = None;
+        let mut lines = Vec::new();
+        build_hero_section(&mut lines, &detail, 100);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(!text.contains("Failure:"));
+    }
+
+    #[test]
+    fn hero_wraps_long_fail_reason() {
+        let mut detail = dummy_launch_detail();
+        let reason = "The second stage engine failed to ignite after stage separation \
+                      due to a liquid oxygen feedline pressure anomaly detected shortly \
+                      before the scheduled relight sequence.";
+        detail.failreason = Some(reason.into());
+        let mut lines = Vec::new();
+        build_hero_section(&mut lines, &detail, 60);
+
+        let start = lines
+            .iter()
+            .position(|l| line_text(l).contains("The second stage"))
+            .expect("first fragment present");
+        let end = lines
+            .iter()
+            .position(|l| line_text(l).contains("relight sequence"))
+            .expect("last fragment present");
+        assert!(end > start, "long fail reason should wrap onto multiple lines");
     }
 
     // ── Probability colouring ─────────────────────────────────────────
