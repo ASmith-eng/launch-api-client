@@ -25,6 +25,14 @@ const TWO_COL_MIN_WIDTH: u16 = 100;
 /// Fixed width for the provider success/failure bar.
 const RECORD_BAR_WIDTH: usize = 20;
 
+/// Column widths for the crew table (name, then role; agency fills the rest).
+const CREW_NAME_WIDTH: usize = 20;
+const CREW_ROLE_WIDTH: usize = 18;
+
+/// Column widths for the landing table (stage, then landing type; location fills the rest).
+const LANDING_STAGE_WIDTH: usize = 13;
+const LANDING_TYPE_WIDTH: usize = 7;
+
 /// Render the full detail view into the given area.
 ///
 /// If the launch ID is found in `app.detail_cache`, renders the full
@@ -254,6 +262,49 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
     }
 
     lines.push(Line::raw(""));
+}
+
+// ---------------------------------------------------------------------------
+// Updates section (conditional — reverse-chronological status timeline)
+// ---------------------------------------------------------------------------
+
+/// Build the conditional UPDATES section: up to the 5 most recent updates,
+/// each shown as a Tier 3 timestamp label followed by its Tier 2 comment.
+///
+/// Renders nothing when `detail.updates` is empty. Updates arrive
+/// reverse-chronological from the API, so the first 5 are the most recent.
+#[allow(dead_code)]
+fn build_updates_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, width: u16) {
+    if detail.updates.is_empty() {
+        return;
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(section_header("UPDATES"));
+    lines.push(Line::raw(""));
+
+    // 3-char indent + 3-char right margin, matching the other sections.
+    let wrap_width = (width as usize).saturating_sub(6);
+
+    for update in detail.updates.iter().take(5) {
+        // Timestamp — Tier 3 label, e.g. "Mar 21, 02:31 UTC".
+        let timestamp = update.created_on.format("%b %d, %H:%M UTC").to_string();
+        lines.push(Line::from(Span::styled(
+            format!("   {timestamp}"),
+            style::label(),
+        )));
+
+        // Comment — Tier 2 secondary, word-wrapped to the available width.
+        for wrapped in word_wrap(&update.comment, wrap_width) {
+            lines.push(Line::from(Span::styled(
+                format!("   {wrapped}"),
+                style::secondary(),
+            )));
+        }
+
+        // Blank line between entries.
+        lines.push(Line::raw(""));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +552,80 @@ fn build_mission_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) 
         }
     }
 
+    // Conditional sub-sections: only present on crewed / recoverable flights.
+    build_crew_subsection(lines, detail);
+    build_landing_subsection(lines, detail);
+
     lines.push(Line::raw(""));
+}
+
+/// Append the CREW sub-section when the launch has assigned crew.
+///
+/// Renders a three-column table (name, role, agency) with fixed column
+/// widths. Names longer than the column are not truncated — they push the
+/// following columns right rather than being clipped. Does nothing for
+/// uncrewed flights.
+fn build_crew_subsection(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
+    if detail.crew.is_empty() {
+        return;
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(section_header("CREW"));
+
+    for member in &detail.crew {
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("{:<w$}", member.name, w = CREW_NAME_WIDTH),
+                style::secondary(),
+            ),
+            Span::styled(
+                format!("{:<w$}", member.role, w = CREW_ROLE_WIDTH),
+                style::label(),
+            ),
+            Span::styled(member.agency.clone(), style::label()),
+        ]));
+    }
+}
+
+/// Append the LANDING sub-section when at least one stage attempts a landing.
+///
+/// One row per attempted landing: stage type, landing type abbreviation, and
+/// landing location. Any of these may be `None` (the API often omits the type
+/// or location before a landing is finalised); missing values are left blank
+/// rather than shown as a placeholder. Stages with no landing attempt are
+/// skipped entirely.
+fn build_landing_subsection(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
+    if !detail.landings.iter().any(|l| l.landing_attempt) {
+        return;
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(section_header("LANDING"));
+
+    for landing in detail.landings.iter().filter(|l| l.landing_attempt) {
+        let stage = landing.stage_type.as_deref().unwrap_or("");
+        let landing_type = landing.landing_type.as_deref().unwrap_or("");
+
+        let mut spans = vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("{:<w$}", stage, w = LANDING_STAGE_WIDTH),
+                style::secondary(),
+            ),
+            Span::styled(
+                format!("{:<w$}", landing_type, w = LANDING_TYPE_WIDTH),
+                style::label(),
+            ),
+        ];
+
+        if let Some(location) = &landing.landing_location {
+            spans.push(Span::styled(location.clone(), style::secondary()));
+        }
+
+        lines.push(Line::from(spans));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,8 +826,8 @@ mod tests {
     use crate::cache::CacheStrategy;
     use crate::models::tests::dummy_launch_detail;
     use crate::models::{
-        LaunchDetail, LocationInfo, MissionSummary, OrbitInfo, PadInfo, Probability, Provider,
-        UrlEntry,
+        CrewMember, LaunchDetail, LaunchUpdate, LocationInfo, MissionSummary, OrbitInfo, PadInfo,
+        Probability, Provider, StageLanding, UrlEntry,
     };
 
     /// Build a richly populated detail for testing.
@@ -871,6 +995,247 @@ mod tests {
             .position(|l| line_text(l).contains("relight sequence"))
             .expect("last fragment present");
         assert!(end > start, "long fail reason should wrap onto multiple lines");
+    }
+
+    // ── Updates section ───────────────────────────────────────────────
+
+    /// Build a `LaunchUpdate` at a fixed 2026 date for timestamp assertions.
+    fn make_update(month: u32, day: u32, hour: u32, minute: u32, comment: &str) -> LaunchUpdate {
+        use chrono::TimeZone;
+        LaunchUpdate {
+            comment: comment.into(),
+            created_on: Utc.with_ymd_and_hms(2026, month, day, hour, minute, 0).unwrap(),
+            info_url: None,
+        }
+    }
+
+    #[test]
+    fn updates_empty_produces_no_lines() {
+        let detail = dummy_launch_detail();
+        let mut lines = Vec::new();
+        build_updates_section(&mut lines, &detail, 100);
+        assert!(lines.is_empty(), "empty updates should render nothing");
+    }
+
+    #[test]
+    fn updates_three_render_with_timestamp_and_comment() {
+        let mut detail = dummy_launch_detail();
+        detail.updates = vec![
+            make_update(3, 21, 2, 31, "Delayed to March 25."),
+            make_update(3, 20, 19, 8, "Launch pad assigned."),
+            make_update(3, 19, 10, 41, "Added daily launch window."),
+        ];
+        let mut lines = Vec::new();
+        build_updates_section(&mut lines, &detail, 100);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("UPDATES"));
+        assert!(text.contains("Mar 21, 02:31 UTC"));
+        assert!(text.contains("Delayed to March 25."));
+        assert!(text.contains("Mar 20, 19:08 UTC"));
+        assert!(text.contains("Launch pad assigned."));
+        assert!(text.contains("Mar 19, 10:41 UTC"));
+        assert!(text.contains("Added daily launch window."));
+    }
+
+    #[test]
+    fn updates_cap_at_five_most_recent() {
+        let mut detail = dummy_launch_detail();
+        detail.updates = (0..8)
+            .map(|i| make_update(3, 1 + i as u32, 12, 0, &format!("Update number {i}")))
+            .collect();
+        let mut lines = Vec::new();
+        build_updates_section(&mut lines, &detail, 100);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        for i in 0..5 {
+            assert!(text.contains(&format!("Update number {i}")), "update {i} should render");
+        }
+        for i in 5..8 {
+            assert!(
+                !text.contains(&format!("Update number {i}")),
+                "update {i} beyond the first 5 should be hidden"
+            );
+        }
+    }
+
+    #[test]
+    fn updates_long_comment_wraps() {
+        let mut detail = dummy_launch_detail();
+        let comment = "Flight readiness review complete and all systems reported nominal \
+                       following an extended review of second stage telemetry captured \
+                       during the most recent static fire test campaign at the launch site.";
+        detail.updates = vec![make_update(3, 12, 14, 22, comment)];
+        let mut lines = Vec::new();
+        build_updates_section(&mut lines, &detail, 60);
+
+        let start = lines
+            .iter()
+            .position(|l| line_text(l).contains("Flight readiness"))
+            .expect("first fragment present");
+        let end = lines
+            .iter()
+            .position(|l| line_text(l).contains("launch site"))
+            .expect("last fragment present");
+        assert!(end > start, "long comment should wrap onto multiple lines");
+    }
+
+    // ── Mission crew + landing sub-sections ───────────────────────────
+
+    fn make_crew(name: &str, role: &str, agency: &str) -> CrewMember {
+        CrewMember {
+            name: name.into(),
+            role: role.into(),
+            agency: agency.into(),
+        }
+    }
+
+    fn make_landing(
+        stage: Option<&str>,
+        attempt: bool,
+        landing_type: Option<&str>,
+        location: Option<&str>,
+    ) -> StageLanding {
+        StageLanding {
+            stage_type: stage.map(Into::into),
+            landing_attempt: attempt,
+            landing_success: None,
+            landing_type: landing_type.map(Into::into),
+            landing_location: location.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn mission_without_crew_or_landings_omits_subsections() {
+        let mut detail = dummy_launch_detail();
+        detail.mission = Some(MissionSummary {
+            name: "Crew-10".into(),
+            mission_type: "Crew Rotation".into(),
+            description: None,
+            orbit: None,
+        });
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("MISSION"));
+        assert!(text.contains("Crew-10 (Crew Rotation)"));
+        assert!(!text.contains("CREW"));
+        assert!(!text.contains("LANDING"));
+    }
+
+    #[test]
+    fn mission_renders_crew_table() {
+        let mut detail = dummy_launch_detail();
+        detail.crew = vec![
+            make_crew("Anne McClain", "Commander", "NASA"),
+            make_crew("Akihiko Hoshide", "Pilot", "JAXA"),
+            make_crew("Thomas Pesquet", "Mission Spc.", "ESA"),
+            make_crew("Megan McArthur", "Mission Spc.", "NASA"),
+        ];
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("CREW"));
+        for (name, role, agency) in [
+            ("Anne McClain", "Commander", "NASA"),
+            ("Akihiko Hoshide", "Pilot", "JAXA"),
+            ("Thomas Pesquet", "Mission Spc.", "ESA"),
+            ("Megan McArthur", "Mission Spc.", "NASA"),
+        ] {
+            assert!(text.contains(name), "crew name {name} should render");
+            assert!(text.contains(role), "crew role {role} should render");
+            assert!(text.contains(agency), "crew agency {agency} should render");
+        }
+
+        // Name column is padded so the role column aligns.
+        let row = lines
+            .iter()
+            .find(|l| line_text(l).contains("Anne McClain"))
+            .expect("crew row present");
+        let name_span = &row.spans[1];
+        assert!(name_span.content.starts_with("Anne McClain"));
+        assert_eq!(name_span.content.chars().count(), CREW_NAME_WIDTH);
+    }
+
+    #[test]
+    fn mission_renders_landing_row_when_attempted() {
+        let mut detail = dummy_launch_detail();
+        detail.landings = vec![make_landing(
+            Some("Booster"),
+            true,
+            Some("RTLS"),
+            Some("Landing Zone 1"),
+        )];
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("LANDING"));
+        assert!(text.contains("Booster"));
+        assert!(text.contains("RTLS"));
+        assert!(text.contains("Landing Zone 1"));
+    }
+
+    #[test]
+    fn mission_omits_landing_when_no_attempt() {
+        let mut detail = dummy_launch_detail();
+        detail.landings = vec![make_landing(Some("Booster"), false, None, None)];
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(!text.contains("LANDING"));
+    }
+
+    #[test]
+    fn mission_renders_all_landing_rows_multi_stage() {
+        let mut detail = dummy_launch_detail();
+        detail.landings = vec![
+            make_landing(
+                Some("Core"),
+                true,
+                Some("ASDS"),
+                Some("Of Course I Still Love You"),
+            ),
+            make_landing(Some("Side Booster"), true, Some("RTLS"), Some("Landing Zone 1")),
+            make_landing(Some("Side Booster"), true, Some("RTLS"), Some("Landing Zone 2")),
+        ];
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let heading = lines
+            .iter()
+            .position(|l| line_text(l).contains("LANDING"))
+            .expect("landing heading present");
+        let row_count = lines[heading + 1..]
+            .iter()
+            .filter(|l| {
+                let t = line_text(l);
+                t.contains("ASDS") || t.contains("RTLS")
+            })
+            .count();
+        assert_eq!(row_count, 3, "all three recoverable stages should render");
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Of Course I Still Love You"));
+        assert!(text.contains("Landing Zone 1"));
+        assert!(text.contains("Landing Zone 2"));
+    }
+
+    #[test]
+    fn mission_landing_row_omits_missing_columns() {
+        let mut detail = dummy_launch_detail();
+        detail.landings = vec![make_landing(Some("Booster"), true, None, None)];
+        let mut lines = Vec::new();
+        build_mission_section(&mut lines, &detail);
+
+        let text: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("LANDING"));
+        assert!(text.contains("Booster"));
+        assert!(!text.to_lowercase().contains("unknown"));
+        assert!(!text.contains("None"));
     }
 
     // ── Probability colouring ─────────────────────────────────────────

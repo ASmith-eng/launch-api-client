@@ -440,7 +440,15 @@ design plan shows this as a distinct visual element below weather.
 
 ---
 
-## Step 5 — Updates section
+## Step 5 — Updates section ✅ Complete
+
+**Implementation notes:**
+- Added `build_updates_section()` to `detail.rs`, placed just after the hero section. Early-returns when `detail.updates` is empty, so it renders nothing for launches with no timeline.
+- Renders up to 5 updates (`.iter().take(5)`; the API delivers them most-recent-first). Each entry: a `style::label()` timestamp (`"%b %d, %H:%M UTC"` → e.g. `"Mar 21, 02:31 UTC"`) followed by the word-wrapped comment in `style::secondary()`, with a blank line between entries.
+- Comment wrap width is `width - 6` (3-char indent + 3-char right margin), consistent with the other sections.
+- Annotated `#[allow(dead_code)]` — the function is exercised by tests but not yet called from `build_content_lines()`; Step 9 wires it in.
+- Tests: `updates_empty_produces_no_lines`, `updates_three_render_with_timestamp_and_comment`, `updates_cap_at_five_most_recent`, `updates_long_comment_wraps`, plus a `make_update()` fixture helper.
+- `cargo test` passes (449 tests, +4). `cargo check` and clippy clean.
 
 Add the new conditional Updates section.
 
@@ -475,7 +483,15 @@ isolation.
 
 ---
 
-## Step 6 — Mission section: crew + landing
+## Step 6 — Mission section: crew + landing ✅ Complete
+
+**Implementation notes:**
+- Extracted two helpers, `build_crew_subsection()` and `build_landing_subsection()`, called from `build_mission_section()` right after the mission info block. Placed after the `match` (not inside the `Some(mission)` arm) so crew/landing data is rendered independently of whether a mission summary exists.
+- CREW: three-column table with fixed widths (`CREW_NAME_WIDTH = 20`, `CREW_ROLE_WIDTH = 18`; agency fills the rest). Name is Tier 2, role/agency Tier 3. Over-long names push the following columns right rather than being clipped (matches the design's best-effort alignment note).
+- LANDING: filters to `landing_attempt == true` — so the heading appears iff there's ≥1 attempt, and only attempted stages become rows (expended stages are skipped). Columns: stage (Tier 2), landing type abbrev (Tier 3, `LANDING_TYPE_WIDTH = 7`), location (Tier 2). `None` values render blank (no "Unknown"/"None" placeholder); the location span is omitted entirely when absent.
+- **Renders live immediately** — `build_mission_section()` is already part of `build_content_lines()`, so no Step 9 wiring is needed (same as Step 4's fail reason).
+- Tests (6, plus `make_crew()` / `make_landing()` fixtures): no crew/landings → subsections omitted; 4-member crew table (with a column-padding assertion); single attempted landing row; `attempt: false` → no section; 3-stage Falcon-Heavy-style multi-row; and a `None`-columns row that renders just the stage type with no placeholder text.
+- `cargo test` passes (455 tests, +6). `cargo check` and clippy clean.
 
 Add the CREW and LANDING conditional sub-sections to the mission section.
 
