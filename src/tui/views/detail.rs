@@ -33,6 +33,14 @@ const CREW_ROLE_WIDTH: usize = 18;
 const LANDING_STAGE_WIDTH: usize = 13;
 const LANDING_TYPE_WIDTH: usize = 7;
 
+/// Content width at or above which the vehicle specs grid uses two columns.
+/// Equivalent to a [`TWO_COL_MIN_WIDTH`] terminal less the 3-char indent and
+/// 3-char right margin.
+const SPECS_TWO_COL_MIN_WIDTH: usize = TWO_COL_MIN_WIDTH as usize - 6;
+
+/// Width of the left-hand column in the two-column vehicle specs grid.
+const SPECS_LEFT_COL_WIDTH: usize = 30;
+
 /// Render the full detail view into the given area.
 ///
 /// If the launch ID is found in `app.detail_cache`, renders the full
@@ -339,8 +347,9 @@ fn build_two_column_section(
         let left_line = vehicle_lines.get(i).cloned().unwrap_or_default();
         let right_line = location_lines.get(i).cloned().unwrap_or_default();
 
-        let left_text_len: usize = left_line.spans.iter().map(|s| s.content.len()).sum();
-        let padding = half.saturating_sub(left_text_len);
+        // Display width, not byte length: the record bar's `█`/`░` are 3 bytes
+        // wide and the `·` separator 2, but each occupies a single column.
+        let padding = half.saturating_sub(left_line.width());
 
         let mut spans = Vec::with_capacity(left_line.spans.len() + right_line.spans.len() + 3);
         spans.push(Span::raw("   "));
@@ -405,16 +414,180 @@ fn build_single_column_section(
 }
 
 // ---------------------------------------------------------------------------
-// Vehicle content (rocket name only — used in the two-column grid)
+// Vehicle content (name, maiden flight, specs grid, record bar)
 // ---------------------------------------------------------------------------
 
+/// Build the vehicle content: rocket name, maiden flight, specs grid, and
+/// record bar. Every block below the name is conditional on the API having
+/// supplied the data.
+///
+/// `max_width` is the content width available to the caller, and decides
+/// whether the specs grid is laid out in one or two columns.
 fn build_vehicle_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    if let Some(rocket) = &detail.rocket_full_name {
-        for wrapped in word_wrap(rocket, max_width) {
+    if let Some(name) = vehicle_name(detail) {
+        for wrapped in word_wrap(&name, max_width) {
             out.push(Line::from(Span::styled(wrapped, style::secondary())));
         }
+    }
+
+    if let Some(maiden_flight) = &detail.rocket_maiden_flight {
+        out.push(Line::from(Span::styled(
+            format!("Maiden flight: {}", format_maiden_flight(maiden_flight)),
+            style::label(),
+        )));
+    }
+
+    let specs = build_specs_grid(detail, max_width);
+    if !specs.is_empty() {
+        if !out.is_empty() {
+            out.push(Line::raw(""));
+        }
+        out.extend(specs);
+    }
+
+    let record = build_record_lines(
+        detail.rocket_total_launches,
+        detail.rocket_successful_launches,
+        detail.rocket_failed_launches,
+        detail.rocket_consecutive_successes,
+        ConsecutivePlacement::Inline,
+    );
+    if !record.is_empty() {
+        if !out.is_empty() {
+            out.push(Line::raw(""));
+        }
+        out.extend(record);
+    }
+
+    out
+}
+
+/// The rocket's display name, appending the variant only when it is not
+/// already part of the full name (the API frequently repeats it).
+fn vehicle_name(detail: &LaunchDetail) -> Option<String> {
+    let full_name = detail.rocket_full_name.as_ref()?;
+
+    match &detail.rocket_variant {
+        Some(variant) if !variant.is_empty() && !full_name.contains(variant.as_str()) => {
+            Some(format!("{full_name} {variant}"))
+        }
+        _ => Some(full_name.clone()),
+    }
+}
+
+/// Build the specs grid: physical dimensions on the left, payload capacity and
+/// thrust on the right. Only specs the API supplied are rendered; an empty vec
+/// is returned when none are available.
+fn build_specs_grid(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
+    let left: Vec<(&'static str, String)> = [
+        detail
+            .rocket_length
+            .map(|v| ("Length: ", format!("{} m", format_measurement(v)))),
+        detail
+            .rocket_diameter
+            .map(|v| ("Diameter: ", format!("{} m", format_measurement(v)))),
+        detail
+            .rocket_launch_mass
+            .map(|v| ("Launch mass: ", format!("{} t", format_thousands(v as u64)))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let right: Vec<(&'static str, String)> = [
+        detail
+            .rocket_leo_capacity
+            .map(|v| ("LEO capacity: ", format!("{} kg", format_thousands(v as u64)))),
+        detail
+            .rocket_gto_capacity
+            .map(|v| ("GTO capacity: ", format!("{} kg", format_thousands(v as u64)))),
+        detail
+            .rocket_thrust
+            .map(|v| ("Thrust: ", format!("{} kN", format_thousands(v as u64)))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if left.is_empty() && right.is_empty() {
+        return Vec::new();
+    }
+
+    if max_width < SPECS_TWO_COL_MIN_WIDTH {
+        return left
+            .into_iter()
+            .chain(right)
+            .map(|(label, value)| spec_line(label, value))
+            .collect();
+    }
+
+    (0..left.len().max(right.len()))
+        .map(|i| {
+            let mut spans = Vec::with_capacity(4);
+
+            match left.get(i) {
+                Some((label, value)) => {
+                    spans.push(Span::styled(*label, style::label()));
+                    spans.push(Span::styled(value.clone(), style::secondary()));
+                    // Pad out to the column boundary only when a right cell follows.
+                    if right.get(i).is_some() {
+                        let used = label.chars().count() + value.chars().count();
+                        spans.push(Span::raw(
+                            " ".repeat(SPECS_LEFT_COL_WIDTH.saturating_sub(used)),
+                        ));
+                    }
+                }
+                None => spans.push(Span::raw(" ".repeat(SPECS_LEFT_COL_WIDTH))),
+            }
+
+            if let Some((label, value)) = right.get(i) {
+                spans.push(Span::styled(*label, style::label()));
+                spans.push(Span::styled(value.clone(), style::secondary()));
+            }
+
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// A single `label: value` spec line (Tier 3 label, Tier 2 value).
+fn spec_line(label: &'static str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(label, style::label()),
+        Span::styled(value, style::secondary()),
+    ])
+}
+
+/// Format a `"YYYY-MM-DD"` API date as `"Mon D, YYYY"`, falling back to the
+/// raw string when it does not parse.
+fn format_maiden_flight(date: &str) -> String {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|d| d.format("%b %-d, %Y").to_string())
+        .unwrap_or_else(|_| date.to_string())
+}
+
+/// Format a measurement, dropping a redundant trailing zero (`70.0` → `"70"`,
+/// `3.7` → `"3.7"`).
+fn format_measurement(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{}", value.trunc() as i64)
+    } else {
+        format!("{value:.1}")
+    }
+}
+
+/// Group digits with `,` thousands separators (`22800` → `"22,800"`).
+fn format_thousands(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
     }
 
     out
@@ -437,19 +610,66 @@ fn build_provider_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'st
         out.push(Line::from(Span::styled(wrapped, style::secondary())));
     }
 
-    // Provider record bar.
-    if let (Some(total), Some(success), Some(failed)) = (
+    out.extend(build_record_lines(
         detail.provider_total_launches,
         detail.provider_successful_launches,
         detail.provider_failed_launches,
-    ) {
-        if total > 0 {
-            out.push(build_record_bar_line(success, total));
-            out.push(Line::from(Span::styled(
-                format!("{total} launches ({success} ok, {failed} fail)"),
-                style::label(),
-            )));
-        }
+        None, // The provider's consecutive-success count is not surfaced yet.
+        ConsecutivePlacement::OwnLine,
+    ));
+
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Launch record bar (shared by the vehicle and provider sections)
+// ---------------------------------------------------------------------------
+
+/// Where the consecutive-success count sits relative to the stats line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsecutivePlacement {
+    /// Appended to the stats line after a `·`. Suits full-width sections.
+    Inline,
+    /// On its own line below the stats line. Suits narrow columns, where an
+    /// appended count would overflow.
+    OwnLine,
+}
+
+/// Build a record bar followed by its stats line, and optionally a
+/// consecutive-success count.
+///
+/// Returns no lines unless the full success/failure breakdown is available and
+/// at least one launch has flown — a bar drawn from a total alone would imply a
+/// 0% success rate. A `consecutive` count of `Some(0)` is treated as absent.
+fn build_record_lines(
+    total: Option<u32>,
+    success: Option<u32>,
+    failed: Option<u32>,
+    consecutive: Option<u32>,
+    placement: ConsecutivePlacement,
+) -> Vec<Line<'static>> {
+    let (Some(total), Some(success), Some(failed)) = (total, success, failed) else {
+        return Vec::new();
+    };
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let consecutive = consecutive.filter(|count| *count > 0);
+    let mut out = Vec::with_capacity(3);
+    out.push(build_record_bar_line(success, total));
+
+    let mut stats = format!("{total} launches ({success} ok, {failed} fail)");
+    if let (Some(count), ConsecutivePlacement::Inline) = (consecutive, placement) {
+        stats.push_str(&format!(" · {count} consecutive"));
+    }
+    out.push(Line::from(Span::styled(stats, style::label())));
+
+    if let (Some(count), ConsecutivePlacement::OwnLine) = (consecutive, placement) {
+        out.push(Line::from(Span::styled(
+            format!("{count} consecutive"),
+            style::label(),
+        )));
     }
 
     out
@@ -1237,6 +1457,293 @@ mod tests {
         assert!(!text.to_lowercase().contains("unknown"));
         assert!(!text.contains("None"));
     }
+
+    // ── Vehicle section ───────────────────────────────────────────────
+
+    /// Content width of a terminal at/above the two-column threshold.
+    const WIDE: usize = SPECS_TWO_COL_MIN_WIDTH;
+    /// Content width of an 80-column terminal (3-char indent + 3-char margin).
+    const NARROW: usize = 74;
+
+    /// A detail with every vehicle spec populated (Falcon 9 Block 5 figures).
+    fn full_specs_detail() -> LaunchDetail {
+        let mut d = dummy_launch_detail();
+        d.rocket_full_name = Some("Falcon 9".into());
+        d.rocket_length = Some(70.0);
+        d.rocket_diameter = Some(3.7);
+        d.rocket_launch_mass = Some(549.0);
+        d.rocket_leo_capacity = Some(22_800.0);
+        d.rocket_gto_capacity = Some(8_300.0);
+        d.rocket_thrust = Some(7_607.0);
+        d
+    }
+
+    fn vehicle_text(detail: &LaunchDetail, max_width: usize) -> String {
+        build_vehicle_lines(detail, max_width)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn vehicle_without_specs_renders_name_only() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_full_name = Some("Falcon 9".into());
+
+        let lines = build_vehicle_lines(&detail, WIDE);
+        assert_eq!(lines.len(), 1, "no specs or record bar should render");
+        assert_eq!(line_text(&lines[0]), "Falcon 9");
+    }
+
+    #[test]
+    fn vehicle_full_specs_render_two_column_grid() {
+        let detail = full_specs_detail();
+        let lines = build_vehicle_lines(&detail, WIDE);
+        let text = vehicle_text(&detail, WIDE);
+
+        assert!(text.contains("Length: 70 m"));
+        assert!(text.contains("Diameter: 3.7 m"));
+        assert!(text.contains("Launch mass: 549 t"));
+        assert!(text.contains("LEO capacity: 22,800 kg"));
+        assert!(text.contains("GTO capacity: 8,300 kg"));
+        assert!(text.contains("Thrust: 7,607 kN"));
+
+        // Left and right cells share a line.
+        let row = lines
+            .iter()
+            .find(|l| line_text(l).contains("Length: 70 m"))
+            .expect("length row present");
+        assert!(
+            line_text(row).contains("LEO capacity: 22,800 kg"),
+            "wide layout should pair length with LEO capacity on one line"
+        );
+    }
+
+    #[test]
+    fn vehicle_partial_specs_render_only_present_rows() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_length = Some(70.0);
+        detail.rocket_thrust = Some(7_607.0);
+
+        let text = vehicle_text(&detail, WIDE);
+        assert!(text.contains("Length: 70 m"));
+        assert!(text.contains("Thrust: 7,607 kN"));
+        for absent in ["Diameter", "Launch mass", "LEO capacity", "GTO capacity"] {
+            assert!(!text.contains(absent), "{absent} should not render");
+        }
+    }
+
+    #[test]
+    fn vehicle_specs_stack_in_single_column_when_narrow() {
+        let detail = full_specs_detail();
+        let lines = build_vehicle_lines(&detail, NARROW);
+
+        let length_row = lines
+            .iter()
+            .find(|l| line_text(l).contains("Length: 70 m"))
+            .expect("length row present");
+        assert!(
+            !line_text(length_row).contains("LEO capacity"),
+            "narrow layout should stack specs one per line"
+        );
+
+        // All six still render, just stacked.
+        let text = vehicle_text(&detail, NARROW);
+        for spec in ["Length:", "Diameter:", "Launch mass:", "LEO capacity:", "GTO capacity:", "Thrust:"] {
+            assert!(text.contains(spec), "{spec} should still render when narrow");
+        }
+    }
+
+    #[test]
+    fn vehicle_maiden_flight_is_formatted() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_maiden_flight = Some("2018-05-11".into());
+        assert!(vehicle_text(&detail, WIDE).contains("Maiden flight: May 11, 2018"));
+    }
+
+    #[test]
+    fn vehicle_maiden_flight_day_is_not_zero_padded() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_maiden_flight = Some("2010-06-04".into());
+        assert!(vehicle_text(&detail, WIDE).contains("Maiden flight: Jun 4, 2010"));
+    }
+
+    #[test]
+    fn vehicle_maiden_flight_falls_back_to_raw_string() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_maiden_flight = Some("not-a-date".into());
+        assert!(vehicle_text(&detail, WIDE).contains("Maiden flight: not-a-date"));
+    }
+
+    #[test]
+    fn vehicle_record_bar_renders_with_stats() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_total_launches = Some(570);
+        detail.rocket_successful_launches = Some(569);
+        detail.rocket_failed_launches = Some(1);
+
+        let text = vehicle_text(&detail, WIDE);
+        assert!(text.contains('█'), "record bar should render");
+        assert!(text.contains("570 launches (569 ok, 1 fail)"));
+    }
+
+    #[test]
+    fn vehicle_record_bar_omitted_when_no_launches() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_total_launches = Some(0);
+        detail.rocket_successful_launches = Some(0);
+        detail.rocket_failed_launches = Some(0);
+
+        let text = vehicle_text(&detail, WIDE);
+        assert!(!text.contains('█'));
+        assert!(!text.contains("launches ("));
+    }
+
+    #[test]
+    fn vehicle_consecutive_successes_appended_to_stats() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_total_launches = Some(570);
+        detail.rocket_successful_launches = Some(569);
+        detail.rocket_failed_launches = Some(1);
+        detail.rocket_consecutive_successes = Some(272);
+
+        assert!(vehicle_text(&detail, WIDE).contains("272 consecutive"));
+    }
+
+    #[test]
+    fn vehicle_zero_consecutive_successes_omitted() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_total_launches = Some(570);
+        detail.rocket_successful_launches = Some(569);
+        detail.rocket_failed_launches = Some(1);
+        detail.rocket_consecutive_successes = Some(0);
+
+        assert!(!vehicle_text(&detail, WIDE).contains("consecutive"));
+    }
+
+    #[test]
+    fn vehicle_name_does_not_duplicate_variant() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_full_name = Some("Falcon 9 Block 5".into());
+        detail.rocket_variant = Some("Block 5".into());
+
+        let lines = build_vehicle_lines(&detail, WIDE);
+        assert_eq!(line_text(&lines[0]), "Falcon 9 Block 5");
+    }
+
+    #[test]
+    fn vehicle_name_appends_informative_variant() {
+        let mut detail = dummy_launch_detail();
+        detail.rocket_full_name = Some("Falcon 9".into());
+        detail.rocket_variant = Some("Block 5".into());
+
+        let lines = build_vehicle_lines(&detail, WIDE);
+        assert_eq!(line_text(&lines[0]), "Falcon 9 Block 5");
+    }
+
+    // ── Shared record bar ─────────────────────────────────────────────
+
+    #[test]
+    fn record_lines_omitted_without_full_breakdown() {
+        // A total alone would imply a 0% success rate.
+        let lines = build_record_lines(Some(570), None, Some(1), None, ConsecutivePlacement::Inline);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn record_lines_omitted_when_no_launches_flown() {
+        let lines =
+            build_record_lines(Some(0), Some(0), Some(0), None, ConsecutivePlacement::Inline);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn record_lines_append_consecutive_inline() {
+        let lines = build_record_lines(
+            Some(570),
+            Some(569),
+            Some(1),
+            Some(272),
+            ConsecutivePlacement::Inline,
+        );
+        assert_eq!(lines.len(), 2, "bar + stats line only");
+        assert_eq!(
+            line_text(&lines[1]),
+            "570 launches (569 ok, 1 fail) · 272 consecutive"
+        );
+    }
+
+    #[test]
+    fn record_lines_put_consecutive_on_own_line() {
+        let lines = build_record_lines(
+            Some(570),
+            Some(569),
+            Some(1),
+            Some(272),
+            ConsecutivePlacement::OwnLine,
+        );
+        assert_eq!(lines.len(), 3, "bar + stats + consecutive");
+        assert_eq!(line_text(&lines[1]), "570 launches (569 ok, 1 fail)");
+        assert_eq!(line_text(&lines[2]), "272 consecutive");
+    }
+
+    #[test]
+    fn record_lines_treat_zero_consecutive_as_absent() {
+        for placement in [ConsecutivePlacement::Inline, ConsecutivePlacement::OwnLine] {
+            let lines = build_record_lines(Some(570), Some(569), Some(1), Some(0), placement);
+            assert_eq!(lines.len(), 2, "{placement:?}: no consecutive line");
+            assert!(!line_text(&lines[1]).contains("consecutive"));
+        }
+    }
+
+    // ── Two-column grid alignment ─────────────────────────────────────
+
+    #[test]
+    fn two_column_divider_aligns_with_multibyte_vehicle_content() {
+        // The record bar's `█`/`░` are 3 bytes wide and the `·` separator 2,
+        // but each occupies one column — padding must use display width.
+        let mut detail = rich_detail();
+        detail.rocket_total_launches = Some(570);
+        detail.rocket_successful_launches = Some(569);
+        detail.rocket_failed_launches = Some(1);
+        detail.rocket_consecutive_successes = Some(272);
+
+        let lines = build_content_lines(&detail, 120);
+        let divider_columns: Vec<usize> = lines
+            .iter()
+            .filter_map(|l| line_text(l).chars().position(|c| c == '│'))
+            .collect();
+
+        assert!(
+            divider_columns.len() >= 4,
+            "expected several grid rows, got {divider_columns:?}"
+        );
+        let expected = divider_columns[0];
+        assert!(
+            divider_columns.iter().all(|col| *col == expected),
+            "divider must sit at one display column on every row, got {divider_columns:?}"
+        );
+    }
+
+    // ── Vehicle formatting helpers ────────────────────────────────────
+
+    #[test]
+    fn format_measurement_drops_trailing_zero() {
+        assert_eq!(format_measurement(70.0), "70");
+        assert_eq!(format_measurement(3.7), "3.7");
+        assert_eq!(format_measurement(549.0), "549");
+    }
+
+    #[test]
+    fn format_thousands_groups_digits() {
+        assert_eq!(format_thousands(0), "0");
+        assert_eq!(format_thousands(549), "549");
+        assert_eq!(format_thousands(7_607), "7,607");
+        assert_eq!(format_thousands(22_800), "22,800");
+        assert_eq!(format_thousands(1_000_000), "1,000,000");
+    }
+
 
     // ── Probability colouring ─────────────────────────────────────────
 

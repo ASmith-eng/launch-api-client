@@ -530,7 +530,25 @@ After the existing mission description block, add:
 
 ---
 
-## Step 7 — Vehicle section expansion
+## Step 7 — Vehicle section expansion ✅ Complete
+
+**Implementation notes:**
+- `build_vehicle_lines()` rewritten to emit, in order: rocket name → maiden flight → specs grid → record bar + stats. Every block below the name is conditional; blank separators are only pushed when a following block exists, so a bare rocket name still renders as a single line.
+- Extracted helpers: `vehicle_name()` (variant dedup via `full_name.contains(variant)`), `build_specs_grid()`, `spec_line()`, `format_maiden_flight()`, `format_measurement()`, `format_thousands()`.
+- Specs grid: left column = length / diameter / launch mass, right = LEO / GTO capacity / thrust. Each cell is a Tier 3 label + Tier 2 value (matching the existing `Orbit:` line). Left cells pad to `SPECS_LEFT_COL_WIDTH = 30` only when a right cell follows, so no trailing whitespace on short rows.
+- **Deviation — specs two-column threshold:** the plan says "two-column when terminal >= 100 cols", but `build_vehicle_lines()` only receives its *content* width, not the terminal width. Gated instead on `SPECS_TWO_COL_MIN_WIDTH = TWO_COL_MIN_WIDTH - 6` (= 94, i.e. a 100-col terminal less the 3-char indent and 3-char margin). This is equivalent once Step 9 makes vehicle full-width, and correctly keeps specs single-column while vehicle still sits in the half-width grid.
+- **Deviation — consecutive successes:** the plan lists this as a separate line, but the design plan's Vehicle mockup shows it appended inline to the stats line (`301 launches (295 ok, 6 fail) · 42 consecutive`). Followed the mockup, since vehicle is full-width. Provider (Step 8) keeps its own separate line — that mockup genuinely differs because it sits in a narrow column.
+- **Deviation — record bar guard:** the plan/design gate on `rocket_total_launches > 0` alone, but the impl mirrors `build_provider_lines()` and requires total + successful + failed all `Some` (the API returns them together). This avoids rendering a bogus 0% bar when only the total is known.
+- Number formatting: `format_measurement()` drops a redundant `.0` (`70.0` → `"70"`, `3.7` → `"3.7"`); `format_thousands()` groups digits (`22800` → `"22,800"`). Maiden flight parses `"YYYY-MM-DD"` → `"Jun 4, 2010"` (`%b %-d, %Y`, no zero-padded day per the mockup), falling back to the raw string when unparseable.
+- Tests: 15 new — name-only, full two-column grid, partial specs, narrow single-column stacking, maiden-flight formatting (incl. non-padded day + unparseable fallback), record bar, zero-total omission, consecutive appended/omitted, both variant-dedup cases, plus unit tests for `format_measurement()` and `format_thousands()`.
+- `cargo test` passes (470 tests, +15). `cargo check` clean; clippy clean on `detail.rs` (the 6 remaining workspace warnings pre-date this branch).
+
+**Post-review fixes (from `/code-review`):**
+- **Divider alignment bug (correctness).** `build_two_column_section()` padded the left grid cell using `s.content.len()` — *byte* length. Harmless while that cell held only an ASCII rocket name, but Step 7 put the record bar (`█`/`░`, 3 bytes / 1 column each) and the `·` separator (2 bytes / 1 column) in there, collapsing the padding to zero: at width 120 the `│` divider rendered at display column 28 on the bar row and 58 on the stats row, versus 59 everywhere else. Fixed by measuring with ratatui's unicode-width-aware `Line::width()`. Guarded by `two_column_divider_aligns_with_multibyte_vehicle_content`, which asserts one divider column across all grid rows (verified to fail against the old code). This also would have bitten Step 9, which moves the *provider* bar into the same cell.
+- **Extracted `build_record_lines()` (reuse).** The bar + stats block was duplicated between `build_vehicle_lines()` and `build_provider_lines()`. Now one helper takes the `Option` triple plus a `consecutive` count and a `ConsecutivePlacement` enum (`Inline` for full-width sections, `OwnLine` for narrow columns — the two mockups genuinely differ because provider sits in a half-width column where an appended count would overflow). The `total`/`success`/`failed` all-`Some` guard and the `total > 0` check now live in one place. **Step 8's "consecutive successes" bullet reduces to passing `detail.provider_consecutive_successes` instead of `None` at the provider call site.**
+- 5 further tests for the helper (missing breakdown, zero total, inline vs own-line placement, zero-consecutive treated as absent). `cargo test` passes (476 tests, +6).
+
+**Known transient issue (resolves in Step 9):** at exactly 100 columns, `half` is 46 but the vehicle stats line `"570 launches (569 ok, 1 fail) · 272 consecutive"` is 47 columns, so it still overflows the divider by one. Step 9 moves vehicle to its own full-width section and puts the (much shorter) provider stats line in the left cell, so this disappears rather than needing a truncation rule.
 
 Expand the vehicle section from just a rocket name to include specs,
 maiden flight, and a vehicle-specific record bar.
