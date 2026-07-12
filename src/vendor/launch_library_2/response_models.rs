@@ -165,6 +165,8 @@ pub struct Ll2Pad {
     #[serde(default)]
     pub name: Option<String>,
     pub location: Ll2Location,
+    #[serde(default)]
+    pub total_launch_count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,6 +182,11 @@ pub struct Ll2Location {
 pub struct Ll2Country {
     pub name: String,
     pub alpha_2_code: String,
+    /// Three-letter ISO country code. Present on provider-level `country[]`
+    /// entries (used for the provider's "Founded {year} · {alpha_3}" line);
+    /// absent on pad/location country objects.
+    #[serde(default)]
+    pub alpha_3_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,6 +232,8 @@ pub struct Ll2LaunchDetail {
     pub probability: Option<i32>,
     #[serde(default)]
     pub weather_concerns: Option<String>,
+    #[serde(default)]
+    pub failreason: Option<String>,
     #[serde(default, deserialize_with = "string_or_image_object::deserialize")]
     pub image: Option<String>,
     pub launch_service_provider: Ll2ProviderDetail,
@@ -235,9 +244,14 @@ pub struct Ll2LaunchDetail {
     pub mission: Option<Ll2MissionDetail>,
     #[serde(default)]
     pub program: Vec<Ll2Program>,
-    #[serde(rename = "vidURLs", default)]
+    #[serde(default)]
+    pub updates: Vec<Ll2LaunchUpdate>,
+    // The LL2 v2.3.0 API uses snake_case (`vid_urls` / `info_urls`); older
+    // v2.2.0 responses (and any caches written against them) use camelCase.
+    // Accept both via `alias` so the active field name is canonical.
+    #[serde(alias = "vidURLs", default)]
     pub vid_urls: Vec<Ll2UrlEntry>,
-    #[serde(rename = "infoURLs", default)]
+    #[serde(alias = "infoURLs", default)]
     pub info_urls: Vec<Ll2UrlEntry>,
 }
 
@@ -253,6 +267,13 @@ pub struct Ll2ProviderDetail {
     pub successful_launches: Option<u32>,
     #[serde(default)]
     pub failed_launches: Option<u32>,
+    /// Country array (each entry has `alpha_3_code`). Empty when absent.
+    #[serde(default)]
+    pub country: Vec<Ll2Country>,
+    #[serde(default)]
+    pub founding_year: Option<u32>,
+    #[serde(default)]
+    pub consecutive_successful_launches: Option<u32>,
 }
 
 /// Rocket configuration in detailed response mode.
@@ -260,15 +281,133 @@ pub struct Ll2ProviderDetail {
 pub struct Ll2Rocket {
     #[serde(default)]
     pub configuration: Option<Ll2RocketConfiguration>,
+    #[serde(default)]
+    pub launcher_stage: Vec<Ll2LauncherStage>,
+    #[serde(default)]
+    pub spacecraft_stage: Vec<Ll2SpacecraftStage>,
 }
 
 /// Rocket configuration details.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Ll2RocketConfiguration {
     #[serde(default)]
     pub full_name: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub length: Option<f64>,
+    #[serde(default)]
+    pub diameter: Option<f64>,
+    #[serde(default)]
+    pub launch_mass: Option<f64>,
+    #[serde(default)]
+    pub leo_capacity: Option<f64>,
+    #[serde(default)]
+    pub gto_capacity: Option<f64>,
+    #[serde(default)]
+    pub to_thrust: Option<f64>,
+    #[serde(default)]
+    pub maiden_flight: Option<String>,
+    #[serde(default)]
+    pub total_launch_count: Option<u32>,
+    #[serde(default)]
+    pub successful_launches: Option<u32>,
+    #[serde(default)]
+    pub failed_launches: Option<u32>,
+    #[serde(default)]
+    pub consecutive_successful_launches: Option<u32>,
+}
+
+/// Launcher (booster) stage entry in `rocket.launcher_stage[]`.
+#[derive(Debug, Deserialize)]
+pub struct Ll2LauncherStage {
+    /// Stage type label (e.g. "Core", "Strap-on Booster"). `type` is a Rust
+    /// keyword so the JSON key is renamed.
+    #[serde(rename = "type", default)]
+    pub stage_type: Option<String>,
+    #[serde(default)]
+    pub landing: Option<Ll2Landing>,
+}
+
+/// Landing record attached to a launcher stage.
+#[derive(Debug, Deserialize)]
+pub struct Ll2Landing {
+    #[serde(default)]
+    pub attempt: bool,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(rename = "type", default)]
+    pub landing_type: Option<Ll2LandingType>,
+    #[serde(default)]
+    pub landing_location: Option<Ll2LandingLocation>,
+}
+
+/// Landing type (e.g. ASDS, RTLS).
+#[derive(Debug, Deserialize)]
+pub struct Ll2LandingType {
+    #[serde(default)]
+    pub abbrev: Option<String>,
+}
+
+/// Specific landing location (e.g. drone ship name).
+#[derive(Debug, Deserialize)]
+pub struct Ll2LandingLocation {
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Spacecraft stage entry in `rocket.spacecraft_stage[]` (used for crewed
+/// missions to expose `launch_crew`).
+#[derive(Debug, Deserialize)]
+pub struct Ll2SpacecraftStage {
+    #[serde(default)]
+    pub launch_crew: Vec<Ll2CrewEntry>,
+}
+
+/// One crew entry from a spacecraft stage's `launch_crew[]`.
+#[derive(Debug, Deserialize)]
+pub struct Ll2CrewEntry {
+    #[serde(default)]
+    pub role: Option<Ll2Role>,
+    #[serde(default)]
+    pub astronaut: Option<Ll2Astronaut>,
+}
+
+/// Crew role wrapper. The display string is at `.role` (not `.name`).
+#[derive(Debug, Deserialize)]
+pub struct Ll2Role {
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+/// Astronaut record (subset — only what we render).
+#[derive(Debug, Deserialize)]
+pub struct Ll2Astronaut {
+    pub name: String,
+    #[serde(default)]
+    pub agency: Option<Ll2AstronautAgency>,
+}
+
+/// Astronaut's agency (subset — name + abbreviation only).
+#[derive(Debug, Deserialize)]
+pub struct Ll2AstronautAgency {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub abbrev: Option<String>,
+}
+
+/// Status update posted against a launch (LL2 `updates[]`).
+#[derive(Debug, Deserialize)]
+pub struct Ll2LaunchUpdate {
+    pub comment: String,
+    pub created_on: DateTime<Utc>,
+    #[serde(default)]
+    pub info_url: Option<String>,
 }
 
 /// Mission in detailed response mode (includes `info_urls` and `vid_urls`).
@@ -331,61 +470,12 @@ pub struct Ll2ThrottleResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// JSON payload matching the LL2 `/launches/upcoming/?mode=normal` shape,
-    /// based on example data from the design document.
-    const SAMPLE_LIST_JSON: &str = r#"{
-        "count": 147,
-        "next": "https://lldev.thespacedevs.com/2.3.0/launches/upcoming/?limit=10&offset=10",
-        "previous": null,
-        "results": [
-            {
-                "id": "e3df2ecd-c239-472f-95e4-2b89b4f75800",
-                "name": "Starship IFT-7",
-                "net": "2026-02-28T09:00:00Z",
-                "net_precision": {
-                    "id": 1,
-                    "name": "Day",
-                    "abbrev": "Day"
-                },
-                "window_start": "2026-02-28T09:00:00Z",
-                "window_end": "2026-02-28T12:00:00Z",
-                "status": {
-                    "id": 1,
-                    "name": "Go for Launch",
-                    "abbrev": "Go",
-                    "description": "Current launch date is a go."
-                },
-                "launch_service_provider": {
-                    "name": "SpaceX",
-                    "type": "Commercial"
-                },
-                "pad": {
-                    "name": "Orbital Launch Mount A",
-                    "location": {
-                        "name": "Starbase, Texas",
-                        "timezone_name": "America/Chicago",
-                        "country_code": "US"
-                    }
-                },
-                "mission": {
-                    "name": "Starship IFT-7",
-                    "type": "Test Flight",
-                    "description": "Seventh integrated flight test of the Starship system.",
-                    "orbit": {
-                        "id": 8,
-                        "name": "Low Earth Orbit",
-                        "abbrev": "LEO"
-                    }
-                }
-            }
-        ]
-    }"#;
+    use crate::vendor::launch_library_2::fixtures;
 
     #[test]
     fn deserialize_paginated_launch_list() {
         let response: PaginatedResponse<Ll2Launch> =
-            serde_json::from_str(SAMPLE_LIST_JSON).expect("should deserialize");
+            serde_json::from_str(fixtures::STARSHIP_LIST).expect("should deserialize");
 
         assert_eq!(response.count, 147);
         assert!(response.next.is_some());
@@ -434,83 +524,10 @@ mod tests {
         assert!(launch.pad.location.country.is_none());
     }
 
-    /// JSON payload matching the LL2 `/launch/{id}/` detailed response shape.
-    const SAMPLE_DETAIL_JSON: &str = r#"{
-        "id": "e3df2ecd-c239-472f-95e4-2b89b4f75800",
-        "url": "https://ll.thespacedevs.com/2.3.0/launches/e3df2ecd/",
-        "name": "Starship IFT-7",
-        "response_mode": "detailed",
-        "slug": "starship-ift-7",
-        "status": {
-            "id": 1,
-            "name": "Go for Launch",
-            "abbrev": "Go",
-            "description": "Current launch date is a go."
-        },
-        "net": "2026-02-28T09:00:00Z",
-        "net_precision": { "id": 1, "name": "Day", "abbrev": "Day" },
-        "window_start": "2026-02-28T09:00:00Z",
-        "window_end": "2026-02-28T12:00:00Z",
-        "image": "https://example.com/starship.jpg",
-        "probability": 90,
-        "weather_concerns": "No concerns",
-        "failreason": "",
-        "hashtag": null,
-        "launch_service_provider": {
-            "response_mode": "normal",
-            "id": 121,
-            "name": "SpaceX",
-            "type": "Commercial",
-            "total_launch_count": 301,
-            "successful_launches": 295,
-            "failed_launches": 6
-        },
-        "rocket": {
-            "id": 1000,
-            "configuration": {
-                "response_mode": "detailed",
-                "id": 207,
-                "name": "Starship",
-                "full_name": "Starship (Super Heavy + Starship)",
-                "variant": "Block 1"
-            }
-        },
-        "pad": {
-            "name": "Orbital Launch Mount A",
-            "location": {
-                "name": "Starbase, Texas",
-                "timezone_name": "America/Chicago",
-                "country": {
-                    "name": "United States of America",
-                    "alpha_2_code": "US"
-                }
-            }
-        },
-        "mission": {
-            "id": 5000,
-            "name": "Starship IFT-7",
-            "type": "Test Flight",
-            "description": "Seventh integrated flight test of the Starship system.",
-            "orbit": { "id": 8, "name": "Low Earth Orbit", "abbrev": "LEO" },
-            "info_urls": [],
-            "vid_urls": []
-        },
-        "program": [
-            { "id": 1, "name": "Starship Development", "url": "https://example.com" }
-        ],
-        "infoURLs": [
-            { "priority": 1, "title": "SpaceX Info", "url": "https://spacex.com/ift7" }
-        ],
-        "vidURLs": [
-            { "priority": 1, "title": "Webcast", "url": "https://youtube.com/watch?v=abc", "source": "YouTube" }
-        ],
-        "webcast_live": false
-    }"#;
-
     #[test]
     fn deserialize_launch_detail() {
         let detail: Ll2LaunchDetail =
-            serde_json::from_str(SAMPLE_DETAIL_JSON).expect("should deserialize detail");
+            serde_json::from_str(fixtures::STARSHIP_DETAIL).expect("should deserialize detail");
 
         assert_eq!(detail.id, "e3df2ecd-c239-472f-95e4-2b89b4f75800");
         assert_eq!(detail.name, "Starship IFT-7");
@@ -557,6 +574,34 @@ mod tests {
         // Programs
         assert_eq!(detail.program.len(), 1);
         assert_eq!(detail.program[0].name, "Starship Development");
+    }
+
+    /// Older LL2 v2.2.0 responses (and any pre-v2.3.0 cached payloads) use
+    /// camelCase `vidURLs` / `infoURLs`. The serde alias must keep these
+    /// deserializing into the same fields as the canonical snake_case names.
+    #[test]
+    fn deserialize_launch_detail_accepts_legacy_camelcase_url_fields() {
+        let json = r#"{
+            "id": "legacy-1",
+            "name": "Legacy Launch",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go for Launch", "abbrev": "Go" },
+            "launch_service_provider": { "name": "SpaceX" },
+            "pad": { "location": { "name": "Starbase" } },
+            "infoURLs": [
+                { "priority": 1, "title": "Info", "url": "https://example.com/info" }
+            ],
+            "vidURLs": [
+                { "priority": 1, "title": "Stream", "url": "https://example.com/stream" }
+            ]
+        }"#;
+
+        let detail: Ll2LaunchDetail =
+            serde_json::from_str(json).expect("legacy camelCase URLs should deserialize");
+        assert_eq!(detail.info_urls.len(), 1);
+        assert_eq!(detail.info_urls[0].url, "https://example.com/info");
+        assert_eq!(detail.vid_urls.len(), 1);
+        assert_eq!(detail.vid_urls[0].title.as_deref(), Some("Stream"));
     }
 
     #[test]
@@ -730,6 +775,124 @@ mod tests {
             detail.image.as_deref(),
             Some("https://example.com/image.jpg")
         );
+    }
+
+    #[test]
+    fn deserialize_falcon9_sample_detail() {
+        let detail: Ll2LaunchDetail = serde_json::from_str(fixtures::FALCON9_DETAIL)
+            .expect("Falcon 9 fixture should deserialize");
+
+        // `failreason` is present as an empty string on a non-failed launch.
+        assert_eq!(detail.failreason.as_deref(), Some(""));
+
+        // Updates: 15 entries; first carries a known comment + timestamp.
+        assert_eq!(detail.updates.len(), 15);
+        let first_update = &detail.updates[0];
+        assert_eq!(first_update.comment, "Now targeting Apr 10 at 02:39 UTC");
+        assert_eq!(
+            first_update.created_on,
+            "2026-04-02T20:45:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+
+        // Launcher stage: one Core booster with an ASDS landing on OCISLY.
+        let rocket = detail.rocket.as_ref().expect("rocket present");
+        assert_eq!(rocket.launcher_stage.len(), 1);
+        let stage = &rocket.launcher_stage[0];
+        assert_eq!(stage.stage_type.as_deref(), Some("Core"));
+        let landing = stage.landing.as_ref().expect("landing present");
+        assert!(landing.attempt);
+        assert_eq!(landing.success, Some(true));
+        assert_eq!(
+            landing.landing_type.as_ref().and_then(|t| t.abbrev.as_deref()),
+            Some("ASDS")
+        );
+        assert_eq!(
+            landing
+                .landing_location
+                .as_ref()
+                .and_then(|l| l.name.as_deref()),
+            Some("Of Course I Still Love You")
+        );
+
+        // Spacecraft stage absent for an uncrewed mission.
+        assert!(rocket.spacecraft_stage.is_empty());
+
+        // Configuration specs — the headline numbers shown in the Vehicle box.
+        let config = rocket.configuration.as_ref().expect("configuration present");
+        assert_eq!(config.variant.as_deref(), Some("Block 5"));
+        assert_eq!(config.length, Some(70.0));
+        assert_eq!(config.diameter, Some(3.65));
+        assert_eq!(config.launch_mass, Some(549.0));
+        assert_eq!(config.leo_capacity, Some(22800.0));
+        assert_eq!(config.gto_capacity, Some(8300.0));
+        assert_eq!(config.to_thrust, Some(7607.0));
+        assert_eq!(config.maiden_flight.as_deref(), Some("2018-05-11"));
+        assert_eq!(config.total_launch_count, Some(570));
+        assert_eq!(config.successful_launches, Some(569));
+        assert_eq!(config.failed_launches, Some(1));
+        assert_eq!(config.consecutive_successful_launches, Some(272));
+
+        // Provider — country array with alpha_3, founding year, consecutive.
+        let provider = &detail.launch_service_provider;
+        assert_eq!(provider.country.len(), 1);
+        assert_eq!(provider.country[0].alpha_3_code.as_deref(), Some("USA"));
+        assert_eq!(provider.founding_year, Some(2002));
+        assert_eq!(provider.consecutive_successful_launches, Some(148));
+
+        // Pad-level launch count.
+        assert_eq!(detail.pad.total_launch_count, Some(259));
+    }
+
+    #[test]
+    fn deserialize_soyuz_crewed_sample_detail() {
+        let detail: Ll2LaunchDetail = serde_json::from_str(fixtures::SOYUZ_CREWED_DETAIL)
+            .expect("Soyuz fixture should deserialize");
+
+        let rocket = detail.rocket.as_ref().expect("rocket present");
+
+        // Crewed launch: spacecraft_stage carries the crew, launcher_stage is empty.
+        assert!(rocket.launcher_stage.is_empty());
+        assert_eq!(rocket.spacecraft_stage.len(), 1);
+
+        let crew = &rocket.spacecraft_stage[0].launch_crew;
+        assert_eq!(crew.len(), 3);
+
+        let first = &crew[0];
+        let astronaut = first.astronaut.as_ref().expect("astronaut present");
+        assert_eq!(astronaut.name, "Pyotr Dubrov");
+        assert_eq!(
+            first.role.as_ref().and_then(|r| r.role.as_deref()),
+            Some("Commander")
+        );
+        assert_eq!(
+            astronaut.agency.as_ref().and_then(|a| a.abbrev.as_deref()),
+            Some("RFSA")
+        );
+    }
+
+    /// All Step 2 fields are optional / `#[serde(default)]` — a minimal
+    /// payload with none of them present must still deserialize.
+    #[test]
+    fn deserialize_launch_detail_tolerates_missing_step2_fields() {
+        let json = r#"{
+            "id": "minimal",
+            "name": "Minimal Launch",
+            "net": "2026-03-01T00:00:00Z",
+            "status": { "id": 1, "name": "Go", "abbrev": "Go" },
+            "launch_service_provider": { "name": "Unknown" },
+            "pad": { "location": { "name": "Unknown" } }
+        }"#;
+
+        let detail: Ll2LaunchDetail = serde_json::from_str(json).expect("should deserialize");
+        assert!(detail.failreason.is_none());
+        assert!(detail.updates.is_empty());
+        assert!(detail.launch_service_provider.country.is_empty());
+        assert!(detail.launch_service_provider.founding_year.is_none());
+        assert!(detail
+            .launch_service_provider
+            .consecutive_successful_launches
+            .is_none());
+        assert!(detail.pad.total_launch_count.is_none());
     }
 
     #[test]

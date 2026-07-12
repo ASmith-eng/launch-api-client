@@ -1,14 +1,15 @@
 //! Conversion from LL2 vendor response models to core domain types.
 
 use crate::models::{
-    CountryInfo, LaunchDetail, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary,
-    NetPrecision, OrbitInfo, PadInfo, Probability, Provider, ThrottleStatus, UrlEntry,
+    CountryInfo, CrewMember, LaunchDetail, LaunchStatus, LaunchSummary, LaunchUpdate, LocationInfo,
+    MissionSummary, NetPrecision, OrbitInfo, PadInfo, Probability, Provider, StageLanding,
+    ThrottleStatus, UrlEntry,
 };
 
 use super::response_models::{
-    Ll2Country, Ll2Launch, Ll2LaunchDetail, Ll2Location, Ll2Mission, Ll2MissionDetail,
-    Ll2NetPrecision, Ll2Orbit, Ll2Pad, Ll2Provider, Ll2ProviderDetail, Ll2Status,
-    Ll2ThrottleResponse, Ll2UrlEntry,
+    Ll2Country, Ll2CrewEntry, Ll2Launch, Ll2LaunchDetail, Ll2LaunchUpdate, Ll2LauncherStage,
+    Ll2Location, Ll2Mission, Ll2MissionDetail, Ll2NetPrecision, Ll2Orbit, Ll2Pad, Ll2Provider,
+    Ll2ProviderDetail, Ll2RocketConfiguration, Ll2Status, Ll2ThrottleResponse, Ll2UrlEntry,
 };
 
 impl From<Ll2Launch> for LaunchSummary {
@@ -106,12 +107,105 @@ impl From<Ll2Orbit> for OrbitInfo {
     }
 }
 
+/// Convert an empty string to `None`.
+///
+/// Several LL2 fields (notably `failreason` and the rocket `variant`) use
+/// `""` rather than `null` to signal an absent value.
+fn non_empty(s: Option<String>) -> Option<String> {
+    s.filter(|s| !s.is_empty())
+}
+
+impl From<Ll2LaunchUpdate> for LaunchUpdate {
+    fn from(ll2: Ll2LaunchUpdate) -> Self {
+        Self {
+            comment: ll2.comment,
+            created_on: ll2.created_on,
+            info_url: ll2.info_url,
+        }
+    }
+}
+
+impl From<Ll2CrewEntry> for CrewMember {
+    fn from(ll2: Ll2CrewEntry) -> Self {
+        let role = ll2.role.and_then(|r| r.role).unwrap_or_default();
+        let (name, agency) = match ll2.astronaut {
+            Some(astronaut) => {
+                // Prefer the compact agency abbreviation for the TUI crew
+                // column; fall back to the full agency name when absent.
+                let agency = astronaut
+                    .agency
+                    .and_then(|a| a.abbrev.or(a.name))
+                    .unwrap_or_default();
+                (astronaut.name, agency)
+            }
+            None => (String::new(), String::new()),
+        };
+        Self { name, role, agency }
+    }
+}
+
+impl From<Ll2LauncherStage> for StageLanding {
+    fn from(ll2: Ll2LauncherStage) -> Self {
+        let (landing_attempt, landing_success, landing_type, landing_location) = match ll2.landing {
+            Some(landing) => (
+                landing.attempt,
+                landing.success,
+                landing.landing_type.and_then(|t| t.abbrev),
+                landing.landing_location.and_then(|l| l.name),
+            ),
+            None => (false, None, None, None),
+        };
+        Self {
+            stage_type: ll2.stage_type,
+            landing_attempt,
+            landing_success,
+            landing_type,
+            landing_location,
+        }
+    }
+}
+
 impl From<Ll2LaunchDetail> for LaunchDetail {
     fn from(ll2: Ll2LaunchDetail) -> Self {
-        let rocket_full_name = ll2
-            .rocket
-            .and_then(|r| r.configuration)
-            .and_then(|c| c.full_name.or(c.name));
+        // Unpack the rocket once: `configuration` carries the vehicle specs,
+        // `launcher_stage` the landing records, `spacecraft_stage` the crew.
+        let (config, launcher_stages, spacecraft_stages) = match ll2.rocket {
+            Some(rocket) => (
+                rocket.configuration.unwrap_or_default(),
+                rocket.launcher_stage,
+                rocket.spacecraft_stage,
+            ),
+            None => (Ll2RocketConfiguration::default(), Vec::new(), Vec::new()),
+        };
+
+        let rocket_full_name = config.full_name.or(config.name);
+
+        // Crew rides on the first spacecraft stage (crewed flights only);
+        // uncrewed flights have no spacecraft stage, hence an empty crew.
+        let crew = spacecraft_stages
+            .into_iter()
+            .next()
+            .map(|stage| stage.launch_crew.into_iter().map(CrewMember::from).collect())
+            .unwrap_or_default();
+
+        let landings = launcher_stages
+            .into_iter()
+            .map(StageLanding::from)
+            .collect();
+
+        let updates = ll2.updates.into_iter().map(LaunchUpdate::from).collect();
+
+        // Provider country code is the first `country[]` entry's three-letter
+        // code; `None` when the array is empty.
+        let provider_country_code = ll2
+            .launch_service_provider
+            .country
+            .into_iter()
+            .next()
+            .and_then(|c| c.alpha_3_code);
+
+        // Read the pad launch count before `pad` is moved into `Self` below.
+        let pad_total_launch_count = ll2.pad.total_launch_count;
 
         // Prefer top-level vidURLs/infoURLs (where the real data lives),
         // falling back to mission-level urls if top-level is empty.
@@ -150,6 +244,10 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
                 .and_then(Probability::new),
             weather_concerns: ll2.weather_concerns,
             image_url: ll2.image,
+            failreason: non_empty(ll2.failreason),
+            updates,
+            crew,
+            landings,
             launch_service_provider: Provider {
                 name: ll2.launch_service_provider.name.clone(),
                 provider_type: ll2.launch_service_provider.provider_type.clone(),
@@ -157,8 +255,27 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
             provider_total_launches: ll2.launch_service_provider.total_launch_count,
             provider_successful_launches: ll2.launch_service_provider.successful_launches,
             provider_failed_launches: ll2.launch_service_provider.failed_launches,
+            provider_country_code,
+            provider_founding_year: ll2.launch_service_provider.founding_year,
+            provider_consecutive_successes: ll2
+                .launch_service_provider
+                .consecutive_successful_launches,
             rocket_full_name,
+            rocket_variant: non_empty(config.variant),
+            rocket_description: config.description,
+            rocket_length: config.length,
+            rocket_diameter: config.diameter,
+            rocket_launch_mass: config.launch_mass,
+            rocket_leo_capacity: config.leo_capacity,
+            rocket_gto_capacity: config.gto_capacity,
+            rocket_thrust: config.to_thrust,
+            rocket_maiden_flight: config.maiden_flight,
+            rocket_total_launches: config.total_launch_count,
+            rocket_successful_launches: config.successful_launches,
+            rocket_failed_launches: config.failed_launches,
+            rocket_consecutive_successes: config.consecutive_successful_launches,
             pad: ll2.pad.into(),
+            pad_total_launch_count,
             mission: ll2.mission.map(Into::into),
             vid_urls,
             info_urls,
@@ -207,6 +324,7 @@ impl From<Ll2ThrottleResponse> for ThrottleStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vendor::launch_library_2::fixtures;
     use crate::vendor::launch_library_2::response_models::*;
     use chrono::{DateTime, Utc};
 
@@ -240,8 +358,10 @@ mod tests {
                     country: Some(Ll2Country {
                         name: "United States of America".into(),
                         alpha_2_code: "US".into(),
+                        alpha_3_code: None,
                     }),
                 },
+                total_launch_count: None,
             },
             mission: Some(Ll2Mission {
                 name: "Starship IFT-7".into(),
@@ -308,6 +428,7 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
         };
@@ -362,12 +483,30 @@ mod tests {
                 total_launch_count: Some(301),
                 successful_launches: Some(295),
                 failed_launches: Some(6),
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: Some(Ll2Rocket {
                 configuration: Some(Ll2RocketConfiguration {
                     full_name: Some("Starship (Super Heavy + Starship)".into()),
                     name: Some("Starship".into()),
+                    variant: None,
+                    description: None,
+                    length: None,
+                    diameter: None,
+                    launch_mass: None,
+                    leo_capacity: None,
+                    gto_capacity: None,
+                    to_thrust: None,
+                    maiden_flight: None,
+                    total_launch_count: None,
+                    successful_launches: None,
+                    failed_launches: None,
+                    consecutive_successful_launches: None,
                 }),
+                launcher_stage: vec![],
+                spacecraft_stage: vec![],
             }),
             pad: Ll2Pad {
                 name: Some("Orbital Launch Mount A".into()),
@@ -377,8 +516,10 @@ mod tests {
                     country: Some(Ll2Country {
                         name: "United States of America".into(),
                         alpha_2_code: "US".into(),
+                        alpha_3_code: None,
                     }),
                 },
+                total_launch_count: None,
             },
             mission: Some(Ll2MissionDetail {
                 name: "Starship IFT-7".into(),
@@ -403,6 +544,8 @@ mod tests {
                 title: Some("SpaceX Info".into()),
                 url: "https://spacex.com/ift7".into(),
             }],
+            failreason: None,
+            updates: vec![],
         }
     }
 
@@ -457,6 +600,9 @@ mod tests {
                 total_launch_count: None,
                 successful_launches: None,
                 failed_launches: None,
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: None,
             pad: Ll2Pad {
@@ -466,11 +612,14 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
             program: vec![],
             vid_urls: vec![],
             info_urls: vec![],
+            failreason: None,
+            updates: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();
@@ -481,6 +630,20 @@ mod tests {
         assert!(detail.vid_urls.is_empty());
         assert!(detail.info_urls.is_empty());
         assert!(detail.programs.is_empty());
+
+        // New detail fields all default to absent when the API omits them.
+        assert!(detail.failreason.is_none());
+        assert!(detail.updates.is_empty());
+        assert!(detail.crew.is_empty());
+        assert!(detail.landings.is_empty());
+        assert!(detail.rocket_variant.is_none());
+        assert!(detail.rocket_length.is_none());
+        assert!(detail.rocket_total_launches.is_none());
+        assert!(detail.rocket_consecutive_successes.is_none());
+        assert!(detail.provider_country_code.is_none());
+        assert!(detail.provider_founding_year.is_none());
+        assert!(detail.provider_consecutive_successes.is_none());
+        assert!(detail.pad_total_launch_count.is_none());
     }
 
     #[test]
@@ -507,12 +670,30 @@ mod tests {
                 total_launch_count: None,
                 successful_launches: None,
                 failed_launches: None,
+                country: vec![],
+                founding_year: None,
+                consecutive_successful_launches: None,
             },
             rocket: Some(Ll2Rocket {
                 configuration: Some(Ll2RocketConfiguration {
                     full_name: None,
                     name: Some("Falcon 9".into()),
+                    variant: None,
+                    description: None,
+                    length: None,
+                    diameter: None,
+                    launch_mass: None,
+                    leo_capacity: None,
+                    gto_capacity: None,
+                    to_thrust: None,
+                    maiden_flight: None,
+                    total_launch_count: None,
+                    successful_launches: None,
+                    failed_launches: None,
+                    consecutive_successful_launches: None,
                 }),
+                launcher_stage: vec![],
+                spacecraft_stage: vec![],
             }),
             pad: Ll2Pad {
                 name: None,
@@ -521,15 +702,112 @@ mod tests {
                     timezone_name: None,
                     country: None,
                 },
+                total_launch_count: None,
             },
             mission: None,
             program: vec![],
             vid_urls: vec![],
             info_urls: vec![],
+            failreason: None,
+            updates: vec![],
         };
 
         let detail: LaunchDetail = ll2.into();
         assert_eq!(detail.rocket_full_name.as_deref(), Some("Falcon 9"));
+    }
+
+    #[test]
+    fn non_empty_treats_empty_string_as_none() {
+        assert_eq!(non_empty(Some(String::new())), None);
+        assert_eq!(non_empty(None), None);
+        assert_eq!(non_empty(Some("Block 5".into())).as_deref(), Some("Block 5"));
+    }
+
+    #[test]
+    fn convert_falcon9_fixture_populates_new_fields() {
+        let ll2: Ll2LaunchDetail = serde_json::from_str(fixtures::FALCON9_DETAIL)
+            .expect("Falcon 9 fixture should deserialize");
+        let detail: LaunchDetail = ll2.into();
+
+        // `failreason` is `""` in the fixture and normalises to `None`.
+        assert!(detail.failreason.is_none());
+
+        // Updates carry over in order (15 in the fixture).
+        assert_eq!(detail.updates.len(), 15);
+        assert_eq!(detail.updates[0].comment, "Now targeting Apr 10 at 02:39 UTC");
+
+        // Uncrewed flight — no crew.
+        assert!(detail.crew.is_empty());
+
+        // One Core booster landing (ASDS on OCISLY).
+        assert_eq!(detail.landings.len(), 1);
+        let landing = &detail.landings[0];
+        assert_eq!(landing.stage_type.as_deref(), Some("Core"));
+        assert!(landing.landing_attempt);
+        assert_eq!(landing.landing_success, Some(true));
+        assert_eq!(landing.landing_type.as_deref(), Some("ASDS"));
+        assert_eq!(
+            landing.landing_location.as_deref(),
+            Some("Of Course I Still Love You")
+        );
+
+        // Vehicle specs.
+        assert_eq!(detail.rocket_variant.as_deref(), Some("Block 5"));
+        assert_eq!(detail.rocket_length, Some(70.0));
+        assert_eq!(detail.rocket_diameter, Some(3.65));
+        assert_eq!(detail.rocket_launch_mass, Some(549.0));
+        assert_eq!(detail.rocket_leo_capacity, Some(22800.0));
+        assert_eq!(detail.rocket_gto_capacity, Some(8300.0));
+        assert_eq!(detail.rocket_thrust, Some(7607.0));
+        assert_eq!(detail.rocket_maiden_flight.as_deref(), Some("2018-05-11"));
+        assert_eq!(detail.rocket_total_launches, Some(570));
+        assert_eq!(detail.rocket_successful_launches, Some(569));
+        assert_eq!(detail.rocket_failed_launches, Some(1));
+        assert_eq!(detail.rocket_consecutive_successes, Some(272));
+
+        // Provider + pad.
+        assert_eq!(detail.provider_country_code.as_deref(), Some("USA"));
+        assert_eq!(detail.provider_founding_year, Some(2002));
+        assert_eq!(detail.provider_consecutive_successes, Some(148));
+        assert_eq!(detail.pad_total_launch_count, Some(259));
+    }
+
+    #[test]
+    fn convert_soyuz_fixture_populates_crew() {
+        let ll2: Ll2LaunchDetail = serde_json::from_str(fixtures::SOYUZ_CREWED_DETAIL)
+            .expect("Soyuz fixture should deserialize");
+        let detail: LaunchDetail = ll2.into();
+
+        assert_eq!(detail.crew.len(), 3);
+        let first = &detail.crew[0];
+        assert_eq!(first.name, "Pyotr Dubrov");
+        assert_eq!(first.role, "Commander");
+        // Compact agency abbreviation is preferred over the full name.
+        assert_eq!(first.agency, "RFSA");
+
+        // Crewed Soyuz flight has no recoverable launcher stages.
+        assert!(detail.landings.is_empty());
+    }
+
+    #[test]
+    fn crew_agency_falls_back_to_name_when_abbrev_absent() {
+        let entry = Ll2CrewEntry {
+            role: Some(Ll2Role {
+                role: Some("Flight Engineer".into()),
+            }),
+            astronaut: Some(Ll2Astronaut {
+                name: "Jane Doe".into(),
+                agency: Some(Ll2AstronautAgency {
+                    name: Some("European Space Agency".into()),
+                    abbrev: None,
+                }),
+            }),
+        };
+
+        let member = CrewMember::from(entry);
+        assert_eq!(member.name, "Jane Doe");
+        assert_eq!(member.role, "Flight Engineer");
+        assert_eq!(member.agency, "European Space Agency");
     }
 
     #[test]

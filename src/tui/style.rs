@@ -103,6 +103,17 @@ pub fn record_failure() -> Style {
 }
 
 // ---------------------------------------------------------------------------
+// Alert text
+// ---------------------------------------------------------------------------
+
+/// Warning / failure text style (Red).
+///
+/// Used for the hero fail-reason line shown on a failed launch.
+pub fn warning() -> Style {
+    Style::default().fg(RED)
+}
+
+// ---------------------------------------------------------------------------
 // Link styles
 // ---------------------------------------------------------------------------
 
@@ -197,6 +208,11 @@ mod tests {
     #[test]
     fn record_failure_is_red() {
         assert_eq!(record_failure().fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn warning_is_red() {
+        assert_eq!(warning().fg, Some(Color::Red));
     }
 
     #[test]

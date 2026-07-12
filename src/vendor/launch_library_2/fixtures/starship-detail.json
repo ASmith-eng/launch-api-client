@@ -1,0 +1,71 @@
+{
+    "id": "e3df2ecd-c239-472f-95e4-2b89b4f75800",
+    "url": "https://ll.thespacedevs.com/2.3.0/launches/e3df2ecd/",
+    "name": "Starship IFT-7",
+    "response_mode": "detailed",
+    "slug": "starship-ift-7",
+    "status": {
+        "id": 1,
+        "name": "Go for Launch",
+        "abbrev": "Go",
+        "description": "Current launch date is a go."
+    },
+    "net": "2026-02-28T09:00:00Z",
+    "net_precision": { "id": 1, "name": "Day", "abbrev": "Day" },
+    "window_start": "2026-02-28T09:00:00Z",
+    "window_end": "2026-02-28T12:00:00Z",
+    "image": "https://example.com/starship.jpg",
+    "probability": 90,
+    "weather_concerns": "No concerns",
+    "failreason": "",
+    "hashtag": null,
+    "launch_service_provider": {
+        "response_mode": "normal",
+        "id": 121,
+        "name": "SpaceX",
+        "type": "Commercial",
+        "total_launch_count": 301,
+        "successful_launches": 295,
+        "failed_launches": 6
+    },
+    "rocket": {
+        "id": 1000,
+        "configuration": {
+            "response_mode": "detailed",
+            "id": 207,
+            "name": "Starship",
+            "full_name": "Starship (Super Heavy + Starship)",
+            "variant": "Block 1"
+        }
+    },
+    "pad": {
+        "name": "Orbital Launch Mount A",
+        "location": {
+            "name": "Starbase, Texas",
+            "timezone_name": "America/Chicago",
+            "country": {
+                "name": "United States of America",
+                "alpha_2_code": "US"
+            }
+        }
+    },
+    "mission": {
+        "id": 5000,
+        "name": "Starship IFT-7",
+        "type": "Test Flight",
+        "description": "Seventh integrated flight test of the Starship system.",
+        "orbit": { "id": 8, "name": "Low Earth Orbit", "abbrev": "LEO" },
+        "info_urls": [],
+        "vid_urls": []
+    },
+    "program": [
+        { "id": 1, "name": "Starship Development", "url": "https://example.com" }
+    ],
+    "info_urls": [
+        { "priority": 1, "title": "SpaceX Info", "url": "https://spacex.com/ift7" }
+    ],
+    "vid_urls": [
+        { "priority": 1, "title": "Webcast", "url": "https://youtube.com/watch?v=abc", "source": "YouTube" }
+    ],
+    "webcast_live": false
+}
