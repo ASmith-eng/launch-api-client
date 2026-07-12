@@ -114,33 +114,45 @@ fn build_title_block(launch_id: &str, app: &App) -> ratatui::widgets::Block<'sta
 // ---------------------------------------------------------------------------
 
 /// Build all content lines for the detail view.
+///
+/// Sections render top-to-bottom in the design order: hero, then a conditional
+/// updates timeline, mission, the full-width vehicle section, provider and
+/// location (side by side when wide, stacked when narrow), and a conditional
+/// links section. Conditional sections take their leading separator with them,
+/// so an absent section leaves no dangling rule.
 fn build_content_lines(detail: &LaunchDetail, width: u16) -> Vec<Line<'static>> {
-    let mut lines = Vec::with_capacity(64);
+    let mut lines = Vec::with_capacity(128);
 
-    // Hero header.
+    // 1. Hero.
     build_hero_section(&mut lines, detail, width);
 
-    // Separator.
-    push_separator(&mut lines, width);
-
-    // Vehicle/Provider + Location (two-column or single-column).
-    if width >= TWO_COL_MIN_WIDTH {
-        build_two_column_section(&mut lines, detail, width);
-    } else {
-        build_single_column_section(&mut lines, detail, width);
+    // 2. Updates (conditional — only when the launch has a status timeline).
+    if !detail.updates.is_empty() {
+        push_separator(&mut lines, width);
+        build_updates_section(&mut lines, detail, width);
     }
 
-    // Separator.
+    // 3. Mission.
     push_separator(&mut lines, width);
-
-    // Mission.
     build_mission_section(&mut lines, detail);
 
-    // Separator.
+    // 4. Vehicle (full-width).
     push_separator(&mut lines, width);
+    build_vehicle_section(&mut lines, detail, width);
 
-    // Links.
-    build_links_section(&mut lines, detail);
+    // 5. Provider | Location (two-column when wide, stacked when narrow).
+    push_separator(&mut lines, width);
+    if width >= TWO_COL_MIN_WIDTH {
+        build_provider_location_two_col(&mut lines, detail, width);
+    } else {
+        build_provider_location_stacked(&mut lines, detail, width);
+    }
+
+    // 6. Links (conditional — only when at least one link is present).
+    if has_any_links(detail) {
+        push_separator(&mut lines, width);
+        build_links_section(&mut lines, detail);
+    }
 
     // Trailing blank line for visual breathing room.
     lines.push(Line::raw(""));
@@ -281,7 +293,6 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
 ///
 /// Renders nothing when `detail.updates` is empty. Updates arrive
 /// reverse-chronological from the API, so the first 5 are the most recent.
-#[allow(dead_code)]
 fn build_updates_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, width: u16) {
     if detail.updates.is_empty() {
         return;
@@ -316,26 +327,30 @@ fn build_updates_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, 
 }
 
 // ---------------------------------------------------------------------------
-// Two-column layout (vehicle/provider | location)
+// Provider | Location two-column layout (>= 100 cols)
 // ---------------------------------------------------------------------------
 
-fn build_two_column_section(
+/// Render Provider (left) and Location (right) side by side, separated by a
+/// `│` divider. The `PROVIDER`/`LOCATION` headings live in the grid's header
+/// row, so [`build_provider_lines`] and [`build_location_lines`] contribute
+/// content only.
+fn build_provider_location_two_col(
     lines: &mut Vec<Line<'static>>,
     detail: &LaunchDetail,
     width: u16,
 ) {
     let half = (width as usize).saturating_sub(7) / 2; // 3-char indent + 3-char divider + margin
 
-    let vehicle_lines = build_vehicle_lines(detail, half);
+    let provider_lines = build_provider_lines(detail, half);
     let location_lines = build_location_lines(detail, half);
 
-    // Two-column grid: vehicle (left) │ location (right).
-    let grid_rows = vehicle_lines.len().max(location_lines.len());
+    // Two-column grid: provider (left) │ location (right).
+    let grid_rows = provider_lines.len().max(location_lines.len());
 
     lines.push(Line::raw(""));
 
     // Headers.
-    let left_header = format!("   {:<width$}", "VEHICLE", width = half);
+    let left_header = format!("   {:<width$}", "PROVIDER", width = half);
     let right_header = "LOCATION".to_string();
     lines.push(Line::from(vec![
         Span::styled(left_header, style::section_heading()),
@@ -344,7 +359,7 @@ fn build_two_column_section(
     ]));
 
     for i in 0..grid_rows {
-        let left_line = vehicle_lines.get(i).cloned().unwrap_or_default();
+        let left_line = provider_lines.get(i).cloned().unwrap_or_default();
         let right_line = location_lines.get(i).cloned().unwrap_or_default();
 
         // Display width, not byte length: the record bar's `█`/`░` are 3 bytes
@@ -361,24 +376,16 @@ fn build_two_column_section(
         lines.push(Line::from(spans));
     }
 
-    // Provider section — full-width below the grid, no divider.
-    let provider_width = (width as usize).saturating_sub(6);
-    let provider_lines = build_provider_lines(detail, provider_width);
-    if !provider_lines.is_empty() {
-        lines.push(Line::raw(""));
-        for line in provider_lines {
-            lines.push(indent_line(line));
-        }
-    }
-
     lines.push(Line::raw(""));
 }
 
 // ---------------------------------------------------------------------------
-// Single-column fallback (< 100 cols)
+// Provider + Location stacked fallback (< 100 cols)
 // ---------------------------------------------------------------------------
 
-fn build_single_column_section(
+/// Render Provider then Location stacked vertically, each under its own
+/// heading. Used when the terminal is narrower than [`TWO_COL_MIN_WIDTH`].
+fn build_provider_location_stacked(
     lines: &mut Vec<Line<'static>>,
     detail: &LaunchDetail,
     width: u16,
@@ -387,19 +394,10 @@ fn build_single_column_section(
 
     lines.push(Line::raw(""));
 
-    // Vehicle section.
-    lines.push(section_header("VEHICLE"));
-    for line in build_vehicle_lines(detail, col_width) {
-        lines.push(indent_line(line));
-    }
-
     // Provider section.
-    let provider_lines = build_provider_lines(detail, col_width);
-    if !provider_lines.is_empty() {
-        lines.push(Line::raw(""));
-        for line in provider_lines {
-            lines.push(indent_line(line));
-        }
+    lines.push(section_header("PROVIDER"));
+    for line in build_provider_lines(detail, col_width) {
+        lines.push(indent_line(line));
     }
 
     lines.push(Line::raw(""));
@@ -410,6 +408,24 @@ fn build_single_column_section(
         lines.push(indent_line(line));
     }
 
+    lines.push(Line::raw(""));
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle section (full-width)
+// ---------------------------------------------------------------------------
+
+/// Render the full-width VEHICLE section: the heading followed by the expanded
+/// vehicle content (name, maiden flight, specs grid, record bar). The content
+/// width drives whether the specs grid lays out in one or two columns.
+fn build_vehicle_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, width: u16) {
+    let col_width = (width as usize).saturating_sub(6); // 3-char indent + margin
+
+    lines.push(Line::raw(""));
+    lines.push(section_header("VEHICLE"));
+    for line in build_vehicle_lines(detail, col_width) {
+        lines.push(indent_line(line));
+    }
     lines.push(Line::raw(""));
 }
 
@@ -594,14 +610,15 @@ fn format_thousands(value: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Provider content (name, record bar — rendered full-width below the grid)
+// Provider content (name, founded line, record bar — the left column of the
+// Provider | Location pair)
 // ---------------------------------------------------------------------------
 
 fn build_provider_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    // Provider heading + name underneath.
-    out.push(Line::from(Span::styled("PROVIDER", style::section_heading())));
+    // Provider name. The PROVIDER heading is supplied by the caller — the
+    // two-column grid's header row, or the stacked section header.
     let provider_text = match &detail.launch_service_provider.provider_type {
         Some(pt) => format!("{} ({})", detail.launch_service_provider.name, pt),
         None => detail.launch_service_provider.name.clone(),
@@ -610,11 +627,25 @@ fn build_provider_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'st
         out.push(Line::from(Span::styled(wrapped, style::secondary())));
     }
 
+    // Founded line (Tier 2). Rendered when either the founding year or the
+    // country code is known; the `·` separator appears only when both are. With
+    // just a country code the "Founded" prefix is dropped — there is no year to
+    // found.
+    let founded = match (detail.provider_founding_year, &detail.provider_country_code) {
+        (Some(year), Some(country)) => Some(format!("Founded {year} · {country}")),
+        (Some(year), None) => Some(format!("Founded {year}")),
+        (None, Some(country)) => Some(country.clone()),
+        (None, None) => None,
+    };
+    if let Some(founded) = founded {
+        out.push(Line::from(Span::styled(founded, style::secondary())));
+    }
+
     out.extend(build_record_lines(
         detail.provider_total_launches,
         detail.provider_successful_launches,
         detail.provider_failed_launches,
-        None, // The provider's consecutive-success count is not surfaced yet.
+        detail.provider_consecutive_successes,
         ConsecutivePlacement::OwnLine,
     ));
 
@@ -719,6 +750,15 @@ fn build_location_lines(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'st
     };
     for wrapped in word_wrap(&loc_str, max_width) {
         out.push(Line::from(Span::styled(wrapped, style::secondary())));
+    }
+
+    // Pad launch count (Tier 3). Shown only when the API supplies a non-zero
+    // count.
+    if let Some(count) = detail.pad_total_launch_count.filter(|c| *c > 0) {
+        out.push(Line::from(Span::styled(
+            format!("{count} launches from this pad"),
+            style::label(),
+        )));
     }
 
     out
@@ -853,12 +893,7 @@ fn build_landing_subsection(lines: &mut Vec<Line<'static>>, detail: &LaunchDetai
 // ---------------------------------------------------------------------------
 
 fn build_links_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
-    let has_links = !detail.vid_urls.is_empty()
-        || !detail.info_urls.is_empty()
-        || !detail.programs.is_empty()
-        || detail.image_url.is_some();
-
-    if !has_links {
+    if !has_any_links(detail) {
         return;
     }
 
@@ -901,6 +936,15 @@ fn build_links_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// True when the launch has at least one link to display (webcast, info URL,
+/// program, or image). Gates both the LINKS section and its leading separator.
+fn has_any_links(detail: &LaunchDetail) -> bool {
+    !detail.vid_urls.is_empty()
+        || !detail.info_urls.is_empty()
+        || !detail.programs.is_empty()
+        || detail.image_url.is_some()
+}
 
 /// Push a dark gray separator line.
 fn push_separator(lines: &mut Vec<Line<'static>>, width: u16) {
@@ -1697,17 +1741,129 @@ mod tests {
         }
     }
 
+    // ── Provider founded + consecutive ────────────────────────────────
+
+    fn provider_text(detail: &LaunchDetail) -> String {
+        build_provider_lines(detail, WIDE)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn provider_founded_line_omitted_without_year_or_country() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_founding_year = None;
+        detail.provider_country_code = None;
+        assert!(!provider_text(&detail).contains("Founded"));
+    }
+
+    #[test]
+    fn provider_founded_line_shows_year_and_country() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_founding_year = Some(2002);
+        detail.provider_country_code = Some("USA".into());
+        assert!(provider_text(&detail).contains("Founded 2002 · USA"));
+    }
+
+    #[test]
+    fn provider_founded_line_shows_year_only() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_founding_year = Some(2002);
+        detail.provider_country_code = None;
+
+        let text = provider_text(&detail);
+        assert!(text.contains("Founded 2002"));
+        assert!(!text.contains('·'));
+    }
+
+    #[test]
+    fn provider_founded_line_shows_country_only() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_founding_year = None;
+        detail.provider_country_code = Some("NZL".into());
+
+        let founded = build_provider_lines(&detail, WIDE)
+            .into_iter()
+            .map(|l| line_text(&l))
+            .find(|t| t.contains("NZL"))
+            .expect("country line present");
+        assert_eq!(founded, "NZL", "no 'Founded' prefix without a year");
+    }
+
+    #[test]
+    fn provider_consecutive_successes_render_on_own_line() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_total_launches = Some(301);
+        detail.provider_successful_launches = Some(295);
+        detail.provider_failed_launches = Some(6);
+        detail.provider_consecutive_successes = Some(148);
+
+        let lines = build_provider_lines(&detail, WIDE);
+        let stats = lines
+            .iter()
+            .position(|l| line_text(l).contains("301 launches"))
+            .expect("stats line present");
+        // Consecutive count sits on its own line below the stats (narrow column).
+        assert_eq!(line_text(&lines[stats]), "301 launches (295 ok, 6 fail)");
+        assert_eq!(line_text(&lines[stats + 1]), "148 consecutive");
+    }
+
+    #[test]
+    fn provider_zero_consecutive_successes_omitted() {
+        let mut detail = dummy_launch_detail();
+        detail.provider_total_launches = Some(301);
+        detail.provider_successful_launches = Some(295);
+        detail.provider_failed_launches = Some(6);
+        detail.provider_consecutive_successes = Some(0);
+
+        assert!(!provider_text(&detail).contains("consecutive"));
+    }
+
+    // ── Location pad launch count ──────────────────────────────────────
+
+    fn location_text(detail: &LaunchDetail) -> String {
+        build_location_lines(detail, WIDE)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn location_shows_pad_launch_count() {
+        let mut detail = dummy_launch_detail();
+        detail.pad_total_launch_count = Some(259);
+        assert!(location_text(&detail).contains("259 launches from this pad"));
+    }
+
+    #[test]
+    fn location_omits_pad_launch_count_when_absent() {
+        let mut detail = dummy_launch_detail();
+        detail.pad_total_launch_count = None;
+        assert!(!location_text(&detail).contains("launches from this pad"));
+    }
+
+    #[test]
+    fn location_omits_pad_launch_count_when_zero() {
+        let mut detail = dummy_launch_detail();
+        detail.pad_total_launch_count = Some(0);
+        assert!(!location_text(&detail).contains("launches from this pad"));
+    }
+
     // ── Two-column grid alignment ─────────────────────────────────────
 
     #[test]
-    fn two_column_divider_aligns_with_multibyte_vehicle_content() {
-        // The record bar's `█`/`░` are 3 bytes wide and the `·` separator 2,
-        // but each occupies one column — padding must use display width.
+    fn two_column_divider_aligns_with_multibyte_provider_content() {
+        // The provider record bar's `█`/`░` are 3 bytes wide but each occupies
+        // one display column — the divider padding must measure display width,
+        // not byte length, or the `│` drifts left on the bar row.
         let mut detail = rich_detail();
-        detail.rocket_total_launches = Some(570);
-        detail.rocket_successful_launches = Some(569);
-        detail.rocket_failed_launches = Some(1);
-        detail.rocket_consecutive_successes = Some(272);
+        detail.provider_total_launches = Some(570);
+        detail.provider_successful_launches = Some(569);
+        detail.provider_failed_launches = Some(1);
+        detail.provider_consecutive_successes = Some(272);
 
         let lines = build_content_lines(&detail, 120);
         let divider_columns: Vec<usize> = lines
@@ -1943,6 +2099,203 @@ mod tests {
             .iter()
             .any(|l| l.spans.iter().any(|s| s.content.contains('│')));
         assert!(has_divider, "wide layout should have column divider");
+    }
+
+    // ── Section order & conditional layout (Step 9) ───────────────────
+
+    /// Full detail text, one entry per rendered line.
+    fn content_text(detail: &LaunchDetail, width: u16) -> String {
+        build_content_lines(detail, width)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Count the `━━━` separator rules in a set of content lines.
+    fn separator_count(lines: &[Line<'static>]) -> usize {
+        lines
+            .iter()
+            .filter(|l| l.spans.iter().any(|s| s.content.contains('━')))
+            .count()
+    }
+
+    #[test]
+    fn sections_render_in_design_order() {
+        let mut detail = rich_detail(); // already has mission + links
+        detail.updates = vec![make_update(3, 13, 18, 0, "GO for launch.")];
+
+        let text = content_text(&detail, 120);
+
+        // Hero (badges) → UPDATES → MISSION → VEHICLE → PROVIDER → LOCATION → LINKS.
+        // Provider and Location share a row when wide, so PROVIDER precedes
+        // LOCATION within that line's text.
+        let order = [
+            "██", "UPDATES", "MISSION", "VEHICLE", "PROVIDER", "LOCATION", "LINKS",
+        ];
+        let mut last = 0;
+        for heading in order {
+            let idx = text
+                .find(heading)
+                .unwrap_or_else(|| panic!("section marker {heading:?} missing from output"));
+            assert!(
+                idx >= last,
+                "section {heading:?} rendered out of order (at {idx}, previous ended at {last})"
+            );
+            last = idx;
+        }
+    }
+
+    #[test]
+    fn updates_section_omitted_when_empty() {
+        let mut detail = rich_detail();
+        detail.updates = vec![];
+        assert!(!content_text(&detail, 120).contains("UPDATES"));
+    }
+
+    #[test]
+    fn updates_section_takes_its_own_separator() {
+        // The conditional UPDATES section brings exactly one separator with it,
+        // so no dangling rule is left when updates are absent.
+        let mut with = rich_detail();
+        with.updates = vec![make_update(3, 13, 18, 0, "GO for launch.")];
+        let without = {
+            let mut d = with.clone();
+            d.updates = vec![];
+            d
+        };
+
+        assert_eq!(
+            separator_count(&build_content_lines(&with, 120)),
+            separator_count(&build_content_lines(&without, 120)) + 1,
+        );
+    }
+
+    #[test]
+    fn links_section_takes_its_own_separator() {
+        let with = rich_detail(); // has links
+        let without = {
+            let mut d = with.clone();
+            d.vid_urls = vec![];
+            d.info_urls = vec![];
+            d.programs = vec![];
+            d.image_url = None;
+            d
+        };
+
+        let without_lines = build_content_lines(&without, 120);
+        assert!(
+            !without_lines.iter().any(|l| line_text(l).contains("LINKS")),
+            "no links means no LINKS heading"
+        );
+        assert_eq!(
+            separator_count(&build_content_lines(&with, 120)),
+            separator_count(&without_lines) + 1,
+            "removing links should drop exactly one separator (no trailing rule)"
+        );
+    }
+
+    #[test]
+    fn provider_and_location_share_header_row_when_wide() {
+        let detail = rich_detail();
+        let lines = build_content_lines(&detail, 120);
+
+        let header = lines
+            .iter()
+            .find(|l| line_text(l).contains("PROVIDER"))
+            .expect("provider header present");
+        let text = line_text(header);
+        assert!(
+            text.contains("PROVIDER") && text.contains("LOCATION") && text.contains('│'),
+            "wide layout should pair PROVIDER and LOCATION on one divided row, got {text:?}"
+        );
+    }
+
+    #[test]
+    fn provider_and_location_stack_when_narrow() {
+        let detail = rich_detail();
+        let lines = build_content_lines(&detail, 80);
+
+        let provider_row = lines.iter().position(|l| line_text(l).trim() == "PROVIDER");
+        let location_row = lines.iter().position(|l| line_text(l).trim() == "LOCATION");
+
+        assert!(
+            provider_row.is_some() && location_row.is_some(),
+            "both headings should appear on their own lines when stacked"
+        );
+        assert!(
+            provider_row < location_row,
+            "provider should stack above location"
+        );
+        assert!(
+            !lines.iter().any(|l| line_text(l).contains('│')),
+            "stacked layout should have no column divider"
+        );
+    }
+
+    #[test]
+    fn fully_populated_detail_renders_every_section() {
+        let mut detail = rich_detail();
+        detail.updates = vec![
+            make_update(3, 13, 18, 0, "GO for launch."),
+            make_update(3, 12, 14, 22, "Flight readiness review complete."),
+        ];
+        detail.crew = vec![
+            make_crew("Anne McClain", "Commander", "NASA"),
+            make_crew("Nichole Ayers", "Pilot", "NASA"),
+        ];
+        detail.landings = vec![make_landing(Some("Core"), true, Some("ASDS"), Some("OCISLY"))];
+        detail.rocket_maiden_flight = Some("2010-06-04".into());
+        detail.rocket_length = Some(70.0);
+        detail.rocket_thrust = Some(7_607.0);
+        detail.provider_founding_year = Some(2002);
+        detail.provider_country_code = Some("USA".into());
+        detail.provider_consecutive_successes = Some(42);
+        detail.pad_total_launch_count = Some(223);
+
+        let text = content_text(&detail, 120);
+
+        // Every section and its new Step 4–8 content is present.
+        for expected in [
+            "UPDATES",
+            "GO for launch.",
+            "MISSION",
+            "CREW",
+            "Anne McClain",
+            "LANDING",
+            "OCISLY",
+            "VEHICLE",
+            "Maiden flight: Jun 4, 2010",
+            "PROVIDER",
+            "Founded 2002 · USA",
+            "42 consecutive",
+            "LOCATION",
+            "223 launches from this pad",
+            "LINKS",
+        ] {
+            assert!(text.contains(expected), "output missing {expected:?}");
+        }
+
+        // And it renders to a backend without panicking.
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new((120, 40));
+        let launch_id = detail.id.clone();
+        app.detail_cache.insert(
+            launch_id.clone(),
+            LaunchDetailCache {
+                version: crate::models::CACHE_VERSION,
+                launch_id: launch_id.clone(),
+                fetched_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+                ttl_strategy: CacheStrategy::ShortTerm,
+                data: detail,
+            },
+        );
+        terminal
+            .draw(|frame| render_detail(frame, frame.area(), &launch_id, &app))
+            .unwrap();
+        assert!(!buffer_text(&terminal).is_empty());
     }
 
     // ── Missing optional fields ────────────────────────────────────────

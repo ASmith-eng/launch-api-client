@@ -597,7 +597,15 @@ Rewrite to include:
 
 ---
 
-## Step 8 — Provider + Location expansion
+## Step 8 — Provider + Location expansion ✅ Complete
+
+**Implementation notes:**
+- `build_provider_lines()`: added a Tier 2 (secondary) founded line after the provider name, built with a `match` on `(provider_founding_year, provider_country_code)` — both → `"Founded 2002 · USA"`, year only → `"Founded 2002"`, country only → `"NZL"` (no "Founded" prefix, matching the design's test 4), neither → omitted.
+- **Consecutive successes** required no new rendering code — as Step 7's post-review predicted, it reduced to passing `detail.provider_consecutive_successes` (was hardcoded `None`) into the existing `build_record_lines(..., ConsecutivePlacement::OwnLine)` call. That helper already places the count on its own line below the stats (provider sits in a narrow column) and already treats `Some(0)` as absent.
+- `build_location_lines()`: added a Tier 3 (label) `"N launches from this pad"` line, gated on `pad_total_launch_count.filter(|c| *c > 0)` so `None` and `0` both omit it.
+- **Renders live immediately** — provider/location are already wired into `build_content_lines()` via the two-column / single-column sections, so no Step 9 wiring is needed (same as Steps 4 and 6).
+- Tests (9, +1 beyond the plan): the 4 founded-line cases, consecutive-on-own-line, zero-consecutive-omitted, pad-count present/absent, plus an extra pad-count-zero-omitted edge. Added `provider_text()` / `location_text()` helpers mirroring the existing `vehicle_text()`.
+- `cargo test` passes (485 tests, +9). `cargo check` and clippy clean (0 warnings workspace-wide).
 
 Add the new fields to the provider and location sections.
 
@@ -639,7 +647,17 @@ After the location name line, add:
 
 ---
 
-## Step 9 — Layout restructure
+## Step 9 — Layout restructure ✅ Complete
+
+**Implementation notes:**
+- `build_content_lines()` rewritten to the design order: Hero → Updates (conditional) → Mission → Vehicle (full-width) → Provider | Location (two-col ≥100 / stacked <100) → Links (conditional). Both conditional sections take their leading separator inside the guard, so an absent section leaves no dangling rule.
+- `build_updates_section()` is now wired in (its Step 5 `#[allow(dead_code)]` removed).
+- `build_two_column_section()` → **`build_provider_location_two_col()`**: now pairs Provider (left) │ Location (right); the header row supplies the `PROVIDER`/`LOCATION` headings. `build_single_column_section()` → **`build_provider_location_stacked()`**: Provider then Location, each under a `section_header()`.
+- New **`build_vehicle_section()`** renders the `VEHICLE` heading + Step 7 content full-width. Because it now receives the full content width (`width - 6`), the specs grid goes two-column at ≥100 cols and single-column below — and the Step 7 "transient overflow at exactly 100 cols" is gone, since the (short) provider stats now sit in the narrow column instead of the vehicle stats.
+- **`build_provider_lines()`** no longer emits its own `PROVIDER` heading (the caller supplies it, matching how vehicle/location line-builders already worked). Extracted **`has_any_links()`** so the links separator and section share one condition; `build_links_section()` delegates to it.
+- Tests: 7 new — design-order sweep, updates omitted-when-empty, updates/links each own their separator (count-delta assertions), provider+location share a divided row when wide, stack when narrow, and a fully-populated integration test asserting every Step 4–8 element is present and that it renders to a `TestBackend` without panic. Renamed the Step 7 divider-alignment test to `..._multibyte_provider_content` (provider now occupies that grid cell) and pointed it at provider record fields. Existing content tests passed unchanged (they use order-agnostic `contains` checks).
+- **Verified by inspection:** dumped `build_content_lines()` at width 120 and 80 — both match the design plan mockups (two-column grid with an aligned `│` divider at 120; stacked single-column specs and provider/location at 80).
+- `cargo test` passes (492 tests, +7). `cargo check` and clippy clean (0 warnings workspace-wide).
 
 Reorder the sections in `build_content_lines()` to match the design plan.
 This step also moves provider/location into a two-column pair and vehicle
