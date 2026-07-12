@@ -147,10 +147,11 @@ fn handle_detail_key(app: &mut App, key: KeyEvent) {
             app.detail_scroll_offset = app.detail_scroll_offset.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            // Upper bound is enforced at render time in render_detail() via
-            // `app.detail_scroll_offset.min(max_scroll)`, so over-incrementing
-            // here is visually harmless.
-            app.detail_scroll_offset += 1;
+            // Clamp to the maximum offset cached by the last render. Without the
+            // clamp the offset winds up past the end, and the user then has to
+            // press Up an equal number of times before scrolling visibly moves.
+            let max_scroll = app.detail_max_scroll.get();
+            app.detail_scroll_offset = (app.detail_scroll_offset + 1).min(max_scroll);
         }
         _ => {}
     }
@@ -423,5 +424,67 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Enter));
 
         assert!(app.page_cache.is_empty());
+    }
+
+    // --- Detail scroll key tests ---
+
+    fn detail_app(max_scroll: usize) -> App {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::Detail("some-id".into());
+        app.detail_max_scroll.set(max_scroll);
+        app
+    }
+
+    #[test]
+    fn detail_scroll_down_stops_at_max() {
+        let mut app = detail_app(3);
+
+        // Press Down well past the bottom.
+        for _ in 0..10 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+
+        assert_eq!(
+            app.detail_scroll_offset, 3,
+            "offset must saturate at max, not wind up"
+        );
+    }
+
+    #[test]
+    fn detail_scroll_up_moves_immediately_after_hitting_bottom() {
+        // The regression: over-pressing Down used to require an equal number of
+        // Up presses before scrolling visibly reversed.
+        let mut app = detail_app(3);
+        for _ in 0..10 {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        assert_eq!(app.detail_scroll_offset, 3);
+
+        // A single Up must move straight away.
+        handle_key(&mut app, press(KeyCode::Up));
+        assert_eq!(app.detail_scroll_offset, 2);
+    }
+
+    #[test]
+    fn detail_scroll_up_saturates_at_top() {
+        let mut app = detail_app(3);
+        app.detail_scroll_offset = 1;
+
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Up));
+        handle_key(&mut app, press(KeyCode::Up));
+
+        assert_eq!(app.detail_scroll_offset, 0);
+    }
+
+    #[test]
+    fn detail_scroll_down_does_nothing_when_content_fits() {
+        // max_scroll of 0 means everything fits; Down should stay put.
+        let mut app = detail_app(0);
+
+        handle_key(&mut app, press(KeyCode::Down));
+        handle_key(&mut app, press(KeyCode::Down));
+
+        assert_eq!(app.detail_scroll_offset, 0);
     }
 }

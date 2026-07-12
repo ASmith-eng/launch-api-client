@@ -3,6 +3,7 @@
 //! The [`App`] struct holds all runtime state. [`AppScreen`] encodes which view
 //! is active. Filter types live in [`super::filter`].
 
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
@@ -43,6 +44,13 @@ pub struct App {
     pub list_scroll_offset: usize,
     /// Scroll offset for the detail view.
     pub detail_scroll_offset: usize,
+    /// Maximum valid scroll offset for the detail view, cached from the most
+    /// recent render. `render_detail` is the only place that knows the content
+    /// height (and thus the true maximum), but it borrows `&App`, so the value
+    /// is stashed here through a `Cell` for the key handler to clamp against.
+    /// Without this, holding Down at the bottom would "wind up" the offset far
+    /// past the end, forcing an equal number of Up presses to unwind.
+    pub detail_max_scroll: Cell<usize>,
     /// In-memory detail cache (loaded on demand).
     pub detail_cache: HashMap<String, LaunchDetailCache>,
     /// In-memory page cache for the list view.
@@ -91,6 +99,7 @@ impl App {
             selected_index: 0,
             list_scroll_offset: 0,
             detail_scroll_offset: 0,
+            detail_max_scroll: Cell::new(0),
             detail_cache: HashMap::new(),
             page_cache: HashMap::new(),
             loading: false,

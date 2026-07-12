@@ -73,8 +73,11 @@ pub fn render_detail(frame: &mut ratatui::Frame, area: Rect, launch_id: &str, ap
     let lines = build_content_lines(detail, content_area.width);
     let content_height = lines.len();
 
-    // Clamp scroll offset so user can't scroll past end.
+    // Clamp scroll offset so user can't scroll past end. Cache the maximum so
+    // the key handler can clamp Down presses at the source and avoid winding up
+    // an out-of-range offset (see `App::detail_max_scroll`).
     let max_scroll = content_height.saturating_sub(content_area.height as usize);
+    app.detail_max_scroll.set(max_scroll);
     let scroll_offset = app.detail_scroll_offset.min(max_scroll);
 
     // Render scrollable content.
@@ -2532,5 +2535,54 @@ mod tests {
             text.contains("SpaceX"),
             "detail should show provider, got:\n{text}"
         );
+    }
+
+    #[test]
+    fn render_caches_max_scroll_and_down_key_cannot_wind_up() {
+        use crate::tui::keys::handle_key;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        let press = |code| KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        // A short viewport so the rich detail's content overflows and scrolls.
+        let backend = TestBackend::new(120, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let detail = rich_detail();
+        let launch_id = detail.id.clone();
+        let mut app = App::new((120, 12));
+        app.screen = crate::tui::app::AppScreen::Detail(launch_id.clone());
+        app.detail_cache.insert(
+            launch_id.clone(),
+            LaunchDetailCache {
+                version: crate::models::CACHE_VERSION,
+                launch_id: launch_id.clone(),
+                fetched_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::TimeDelta::hours(1),
+                ttl_strategy: CacheStrategy::ShortTerm,
+                data: detail,
+            },
+        );
+
+        // Render populates the cached maximum from the true content height.
+        terminal
+            .draw(|frame| render_detail(frame, frame.area(), &launch_id, &app))
+            .unwrap();
+        let max = app.detail_max_scroll.get();
+        assert!(max > 0, "content should overflow a 12-row viewport");
+
+        // Holding Down past the bottom must not wind the offset up beyond `max`.
+        for _ in 0..(max + 25) {
+            handle_key(&mut app, press(KeyCode::Down));
+        }
+        assert_eq!(app.detail_scroll_offset, max, "Down must saturate at max");
+
+        // And a single Up scrolls immediately — no unwinding required.
+        handle_key(&mut app, press(KeyCode::Up));
+        assert_eq!(app.detail_scroll_offset, max - 1);
     }
 }
