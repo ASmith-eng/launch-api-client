@@ -1,6 +1,6 @@
 [package]
 name = "launch-client"
-version = "1.0.2"
+version = "1.2.1"
 edition = "2021"
 description = "Terminal UI for browsing upcoming space launches via Launch Library 2"
 license = "MIT"
