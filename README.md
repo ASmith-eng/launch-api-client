@@ -13,8 +13,8 @@ caches everything intelligently based on how soon each launch is happening - so
 the app stays snappy, works offline from its cache, and makes requests only when you
 absolutely need to.
 
-> The published binary is named `launch-client` (the repository is
-> `launch-api-client`).
+> The published binary (and the command you run) is named `deltav` (the
+> repository is `launch-api-client`).
 
 ---
 
@@ -95,16 +95,16 @@ whichever method suits you.
    | Windows (x86_64) | `launch-client-<version>-x86_64-pc-windows-msvc.zip` |
 
 2. Extract the archive.
-3. Move the `launch-client` binary somewhere on your `PATH` (e.g.
+3. Move the `deltav` binary somewhere on your `PATH` (e.g.
    `/usr/local/bin` on macOS/Linux), then run it:
 
    ```sh
-   launch-client
+   deltav
    ```
 
 > **macOS Gatekeeper:** because the binary isn't notarized, the first launch may
 > be blocked. Allow it under **System Settings → Privacy & Security**, or clear
-> the quarantine attribute with `xattr -d com.apple.quarantine ./launch-client`.
+> the quarantine attribute with `xattr -d com.apple.quarantine ./deltav`.
 
 ### Option 2 - Install with Cargo
 
@@ -115,7 +115,7 @@ install straight from the repository:
 cargo install --git https://github.com/ASmith-eng/launch-api-client
 ```
 
-This compiles the release binary and places `launch-client` in
+This compiles the release binary and places `deltav` in
 `~/.cargo/bin/` (make sure that's on your `PATH`). It builds from the latest
 commit on `main`, which always tracks the most recent release-ready code.
 
@@ -136,7 +136,7 @@ cd launch-api-client
 cargo build --release
 ```
 
-The compiled binary is at `target/release/launch-client`.
+The compiled binary is at `target/release/deltav`.
 
 ---
 
@@ -168,7 +168,7 @@ changes between releases - no manual migration needed.
 ## Uninstalling
 
 1. **Remove the binary.**
-   - If you installed with Cargo: `cargo uninstall launch-client`
+   - If you installed with Cargo: `cargo uninstall deltav`
    - Otherwise, delete the binary you placed on your `PATH`.
 
 2. **Remove configuration and cached data** (optional). Launch Client keeps its
@@ -513,7 +513,7 @@ Requires a stable Rust toolchain (see [rustup.rs](https://rustup.rs/)).
 
 ```sh
 cargo build            # debug build
-cargo build --release  # optimized build → target/release/launch-client
+cargo build --release  # optimized build → target/release/deltav
 cargo test             # run the test suite
 cargo clippy           # lint
 ```

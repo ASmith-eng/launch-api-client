@@ -1,9 +1,10 @@
 [package]
-name = "launch-client"
+name = "deltav"
 version = "1.2.1"
 edition = "2021"
 description = "Terminal UI for browsing upcoming space launches via Launch Library 2"
 license = "MIT"
+exclude = ["documentation/", "tools/"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
