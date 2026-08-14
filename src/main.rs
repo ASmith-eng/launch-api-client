@@ -9,6 +9,7 @@ mod tui;
 mod vendor;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::Utc;
 use tracing::{info, warn};
@@ -20,7 +21,7 @@ use clock::{Clock, SystemClock};
 use config::{load_config, AppDirs};
 use vendor::launch_library_2::endpoints::PROD_BASE_URL;
 use models::{AppState, CACHE_VERSION};
-use tui::app::App;
+use tui::app::{App, AppScreen};
 use tui::event::run_event_loop;
 use tui::filter::FilterState;
 use tui::terminal::{install_panic_hook, setup_terminal};
@@ -193,6 +194,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // If cache is stale, signal the event loop to refresh on first iteration.
     if needs_refresh {
         app.refresh_requested = true;
+    }
+
+    // Below the minimum size the splash would render as the size warning and
+    // nothing else, so skip straight to the list rather than stall on it.
+    if !config.ui.disable_startup_splash && !app.is_terminal_too_small() {
+        app.screen = AppScreen::Splash {
+            started_at: Instant::now(),
+        };
     }
 
     // 8. Run the event loop (drives all fetching based on app state).

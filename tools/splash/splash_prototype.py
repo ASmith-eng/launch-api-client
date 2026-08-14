@@ -32,6 +32,9 @@ PANEL_COLS = 72
 PANEL_ROWS = 20
 BYTES_PER_CELL = 7
 HINT = "▶ PRESS ANY KEY TO SKIP…"
+# The app frames every view in a rounded DarkGray border; bright black is what
+# Color::DarkGray emits, and it is available in every colour tier.
+BORDER = "\x1b[90m"
 
 # Quadrant block glyphs indexed by mask (bit 3 = TL, 2 = TR, 1 = BL, 0 = BR).
 QUADRANTS = [
@@ -45,12 +48,12 @@ QUADRANTS = [
 # overridable from the command line so alternative timings can be judged by
 # watching rather than on paper — see --hold and friends.
 PHASES = {
-    "static":   0.35,  # dead noise, no image information
+    "static":   0.15,  # dead noise, no image information
     "ghost":    1.05,  # image colour bleeds into the letters
     "resolve":  0.90,  # letters flip to quadrant cells, image sharpens
     "hold":     0.80,  # full photograph
     "settle":   0.70,  # photo reverts to letters and drains; wordmark ramps up
-    "wordmark": 0.40,  # wordmark alone
+    "wordmark": 0.60,  # wordmark alone
 }
 
 T_STATIC = T_GHOST = T_RESOLVE = T_HOLD = T_SETTLE = T_END = 0.0
@@ -76,6 +79,12 @@ MONO_PHASES = {"field": 0.40, "settle": 0.80, "wordmark": 0.40}
 M_FIELD = MONO_PHASES["field"]
 M_SETTLE = M_FIELD + MONO_PHASES["settle"]
 M_END = M_SETTLE + MONO_PHASES["wordmark"]
+
+# How long the wordmark takes to reach full brightness, independent of how long
+# the wordmark phase lasts. Ramping across the whole phase spends all of it
+# arriving, putting peak brightness on the cut to the list — so the finished
+# wordmark is never actually seen. The rest of the phase is the hold.
+WORDMARK_RAMP = 0.25
 
 # Flat colour of the un-drained letter field when there is no image to tint it.
 FIELD_GREY = (70, 74, 78)
@@ -221,6 +230,12 @@ def tier_bg(rgb, tier):
     return f"\x1b[48;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
 
 
+def wordmark_ramp(elapsed, start, end):
+    """Brightness of the closing wordmark, 0 -> 1 across WORDMARK_RAMP."""
+    span = WORDMARK_RAMP if 0 < WORDMARK_RAMP < (end - start) else (end - start)
+    return lerp(0.0, 1.0, (elapsed - start) / span)
+
+
 def frame_at(elapsed, state, tier="color"):
     """Pure fn(elapsed) -> list of rows; each cell is ('quad', mask, fg, bg)
     or ('glyph', char, colour, None). This is the shape the Rust renderer wants.
@@ -240,12 +255,12 @@ def frame_at(elapsed, state, tier="color"):
         # remain — on their own short timeline.
         ghost = resolve = 0.0
         settle = lerp(0.0, 1.0, (elapsed - M_FIELD) / (M_SETTLE - M_FIELD))
-        finale = lerp(0.0, 1.0, (elapsed - M_SETTLE) / (M_END - M_SETTLE))
+        finale = wordmark_ramp(elapsed, M_SETTLE, M_END)
     else:
         ghost = lerp(0.0, 1.0, (elapsed - T_STATIC) / (T_GHOST - T_STATIC))
         resolve = lerp(0.0, 1.0, (elapsed - T_GHOST) / (T_RESOLVE - T_GHOST))
         settle = lerp(0.0, 1.0, (elapsed - T_HOLD) / (T_SETTLE - T_HOLD))
-        finale = lerp(0.0, 1.0, (elapsed - T_SETTLE) / (T_END - T_SETTLE))
+        finale = wordmark_ramp(elapsed, T_SETTLE, T_END)
 
     out = []
     for cy in range(PANEL_ROWS):
@@ -301,29 +316,46 @@ def hint_style(elapsed, tier="color"):
     return (200, 200, 200) if bright else (90, 94, 98)
 
 
-def paint(frame, elapsed, term, tier="color", lo=0.0, hi=255.0):
+def paint(frame, elapsed, term, tier="color", lo=0.0, hi=255.0, border=True):
     """Serialise a frame to ANSI for `tier`, centred in the terminal."""
     cols, rows = term
-    block_h = PANEL_ROWS + 2  # panel + blank + hint
-    pad_x = max(0, (cols - PANEL_COLS) // 2)
+    # Either way the block is two rows taller than the panel: a border top and
+    # bottom, or the blank spacer and the free-standing hint row.
+    block_w = PANEL_COLS + 2 if border else PANEL_COLS
+    block_h = PANEL_ROWS + 2
+    pad_x = max(0, (cols - block_w) // 2)
     pad_y = max(0, (rows - block_h) // 2)
     lead = " " * pad_x
+    colour = hint_style(elapsed, tier)
 
     buf = ["\x1b[H\x1b[2J"] + ["\n"] * pad_y
+    if border:
+        buf.append(lead + BORDER + "╭" + "─" * PANEL_COLS + "╮\x1b[0m\n")
+
     for row in frame:
-        buf.append(lead)
+        buf.append(lead + (BORDER + "│\x1b[0m" if border else ""))
         for kind, a, b, c in row:
             if kind == "quad":
                 buf.append(tier_fg(b, tier, lo, hi) + tier_bg(c, tier) + QUADRANTS[a])
             else:
                 buf.append("\x1b[49m" + tier_fg(b, tier, lo, hi) + a)
-        buf.append("\x1b[0m\n")
+        buf.append("\x1b[0m" + (BORDER + "│\x1b[0m" if border else "") + "\n")
 
-    buf.append("\n")
-    colour = hint_style(elapsed, tier)
-    if colour:
-        indent = pad_x + (PANEL_COLS - len(HINT)) // 2
-        buf.append(" " * indent + tier_fg(colour, tier, lo, hi) + HINT + "\x1b[0m")
+    if border:
+        # The hint rides the bottom edge as a block title: it is chrome, so it
+        # reads as chrome, and both margin rows survive.
+        edge = "─" * PANEL_COLS
+        if colour:
+            label = f" {HINT} "
+            x = (PANEL_COLS - len(label)) // 2
+            edge = (edge[:x] + "\x1b[0m" + tier_fg(colour, tier, lo, hi) + label
+                    + BORDER + edge[x + len(label):])
+        buf.append(lead + BORDER + "╰" + edge + BORDER + "╯\x1b[0m")
+    else:
+        buf.append("\n")
+        if colour:
+            indent = pad_x + (PANEL_COLS - len(HINT)) // 2
+            buf.append(" " * indent + tier_fg(colour, tier, lo, hi) + HINT + "\x1b[0m")
     return "".join(buf)
 
 
@@ -367,6 +399,7 @@ def dump_png(frame, path, cell_w=12, cell_h=24):
 
 
 def main():
+    global WORDMARK_RAMP
     ap = argparse.ArgumentParser()
     ap.add_argument("--png", help="comma-separated times to dump as PNG instead of playing")
     ap.add_argument("--out", default=".", help="directory for --png output")
@@ -376,8 +409,15 @@ def main():
     for name, default in PHASES.items():
         ap.add_argument(f"--{name}", type=float, default=default, metavar="SEC",
                         help=f"{name} phase duration (default {default:g}s)")
+    ap.add_argument("--ramp", type=float, default=WORDMARK_RAMP, metavar="SEC",
+                    help=f"how long the wordmark takes to reach full brightness "
+                         f"(default {WORDMARK_RAMP:g}s; 0 = the whole wordmark phase)")
+    ap.add_argument("--no-border", action="store_true",
+                    help="drop the rounded frame and put the skip hint on its "
+                         "own row below the panel, as v1 shipped")
     args = ap.parse_args()
 
+    WORDMARK_RAMP = args.ramp
     durations = {name: getattr(args, name) for name in PHASES}
     apply_phases(durations)
     if durations != PHASES:
@@ -437,7 +477,7 @@ def main():
                 break
             sys.stdout.write(
                 paint(frame_at(elapsed, state, args.tier), elapsed, term,
-                      args.tier, lo, hi))
+                      args.tier, lo, hi, not args.no_border))
             sys.stdout.flush()
             time.sleep(max(0.0, (1.0 / FPS) - (time.time() - start - elapsed)))
     except KeyboardInterrupt:

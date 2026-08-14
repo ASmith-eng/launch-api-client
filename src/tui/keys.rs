@@ -18,6 +18,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     match &app.screen {
+        // Any key skips, and is consumed rather than falling through to List.
+        AppScreen::Splash { .. } => app.screen = AppScreen::List,
         AppScreen::Help(prev) => match key.code {
             KeyCode::Esc | KeyCode::Char('?') => {
                 app.screen = *prev.clone();
@@ -486,5 +488,71 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Down));
 
         assert_eq!(app.detail_scroll_offset, 0);
+    }
+
+    // --- Splash tests ---
+
+    fn splash_app() -> App {
+        let mut app = App::new((120, 40));
+        app.screen = AppScreen::Splash {
+            started_at: std::time::Instant::now(),
+        };
+        app
+    }
+
+    #[test]
+    fn any_key_skips_the_splash() {
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Char(' '),
+        ] {
+            let mut app = splash_app();
+            handle_key(&mut app, press(code));
+            assert!(
+                matches!(app.screen, AppScreen::List),
+                "{code:?} did not dismiss the splash"
+            );
+        }
+    }
+
+    #[test]
+    fn skip_key_is_consumed_rather_than_run_as_a_list_command() {
+        let mut app = splash_app();
+        app.launches = vec![sample_launch("1"), sample_launch("2")];
+
+        // 'j' would move the list selection; from the splash it must only skip.
+        handle_key(&mut app, press(KeyCode::Char('j')));
+
+        assert!(matches!(app.screen, AppScreen::List));
+        assert_eq!(app.selected_index, 0);
+    }
+
+    #[test]
+    fn quit_key_skips_the_splash_without_quitting() {
+        let mut app = splash_app();
+
+        handle_key(&mut app, press(KeyCode::Char('q')));
+
+        assert!(matches!(app.screen, AppScreen::List));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_still_quits_from_the_splash() {
+        let mut app = splash_app();
+
+        handle_key(
+            &mut app,
+            KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            },
+        );
+
+        assert!(app.should_quit);
     }
 }

@@ -16,6 +16,7 @@ use crate::tui::views::detail;
 use crate::tui::views::filter;
 use crate::tui::views::help::{self, HelpContext};
 use crate::tui::views::list;
+use crate::tui::views::splash;
 
 /// Render the current app state to the terminal.
 pub fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
@@ -29,6 +30,14 @@ pub fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
             }
 
             match &app.screen {
+                AppScreen::Splash { started_at } => {
+                    splash::render_splash(
+                        frame,
+                        area,
+                        started_at.elapsed(),
+                        splash::ColourTier::detect(),
+                    );
+                }
                 AppScreen::List => list::render_list(frame, area, app),
                 AppScreen::Detail(id) => detail::render_detail(frame, area, id, app),
                 AppScreen::Help(prev) => {

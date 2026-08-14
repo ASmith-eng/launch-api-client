@@ -5,6 +5,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 
@@ -21,6 +22,11 @@ pub const MIN_ROWS: u16 = 24;
 /// Which screen the TUI is currently displaying.
 #[derive(Debug, Clone)]
 pub enum AppScreen {
+    /// Startup splash animation, played once before the list appears.
+    Splash {
+        /// Time origin of the animation.
+        started_at: Instant,
+    },
     /// Main launch list view.
     List,
     /// Detail view for a specific launch (by UUID).
@@ -29,6 +35,13 @@ pub enum AppScreen {
     Help(Box<AppScreen>),
     /// Inline filter panel.
     FilterPanel,
+}
+
+impl AppScreen {
+    /// Whether this screen advances on the fast animation tick
+    pub fn is_animating(&self) -> bool {
+        matches!(self, AppScreen::Splash { .. })
+    }
 }
 
 /// All runtime state for the TUI application.
@@ -212,5 +225,25 @@ mod tests {
         app.current_page = 2;
         app.launches_per_page = 10;
         assert_eq!(app.page_offset(), 20);
+    }
+
+    #[test]
+    fn only_the_splash_drives_the_frame_timer() {
+        let splash = AppScreen::Splash {
+            started_at: Instant::now(),
+        };
+        assert!(splash.is_animating());
+
+        assert!(!AppScreen::List.is_animating());
+        assert!(!AppScreen::Detail("abc".into()).is_animating());
+        assert!(!AppScreen::FilterPanel.is_animating());
+        assert!(!AppScreen::Help(Box::new(AppScreen::List)).is_animating());
+    }
+
+    #[test]
+    fn app_does_not_start_on_the_splash_by_default() {
+        // main.rs opts in explicitly; App::new stays on the list so every
+        // other construction path (tests included) is unaffected.
+        assert!(!App::new((120, 40)).screen.is_animating());
     }
 }

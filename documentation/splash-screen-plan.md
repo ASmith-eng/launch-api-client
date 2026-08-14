@@ -1,6 +1,6 @@
 # Splash Screen & Animation — Design Plan
 
-Status: **DRAFT — for refinement before implementation**
+Status: **SHIPPED — v1 implemented (§11), plus the two post-v1 refinements (§12)**
 
 A startup splash screen featuring a telemetry downlink — a field of `deltav`
 letters resolving into a photograph of the Apollo 14 Lunar Module, which then
@@ -203,21 +203,25 @@ compound error. The asset is built from the original photograph instead
 
 ### 6.0 Fixed panel, centred — LOCKED
 
-The panel is a **fixed 72 × 20 cells**. On terminals larger than the 80×24
-minimum it is **centred, never scaled**.
+The panel is a **fixed 72 × 20 cells**, framed in the app's rounded border
+(§12.2) for a 74 × 22 block. On terminals larger than the 80×24 minimum it is
+**centred, never scaled**.
 
 Budget at exactly 80×24 (`MIN_COLS` / `MIN_ROWS`, `app.rs:17`–`19`):
 
 ```
-       4 cols              72 cols               4 cols
-     ┌───────┬──────────────────────────────────┬───────┐
- 1   │                  (top margin)                    │
- 20  │             splash panel  72 × 20                │
- 1   │                    (blank)                       │
- 1   │           ▶ PRESS ANY KEY TO SKIP…               │
- 1   │                 (bottom margin)                  │
-     └──────────────────────────────────────────────────┘
+      3 cols               74 cols               3 cols
+     ┌──────┬───────────────────────────────────┬──────┐
+ 1   │                  (top margin)                   │
+ 22  │      ╭─── splash panel  72 × 20 ───╮            │
+     │      │                             │            │
+     │      ╰─ ▶ PRESS ANY KEY TO SKIP… ──╯            │
+ 1   │                (bottom margin)                  │
+     └─────────────────────────────────────────────────┘
 ```
+
+The hint rides the bottom border as a block title rather than costing a row of
+its own, which is what keeps both margin rows inside the 24-row budget (§12.2).
 
 Consequences, all of them simplifications:
 
@@ -292,14 +296,24 @@ tip.
 artwork, the crop, or the panel size changes:
 
 ```
-python3 -m pip install pillow                       # canonical decoder
+python3 -m pip install pillow==12.3.0               # canonical decoder
 python3 tools/splash/build_splash_asset.py          # regenerate
 python3 tools/splash/build_splash_asset.py --check  # verify, write nothing
 ```
 
+The version is pinned because Pillow's LANCZOS output *defines* the committed
+bytes — the CI gates pin the same `12.3.0`, so an unpinned local install can
+produce a spurious mismatch. Bumping it is fine, but regenerate and commit the
+asset in the same change.
+
 The generator globs `tools/splash/source/artwork.*` and refuses to run if that
 is ambiguous, so replacing the artwork means dropping in a file and re-running —
 no code edit, no rename.
+
+Alongside the artwork sits `source/artwork.sha256`, a digest of the source the
+committed asset was built from. `--check` verifies it *before* decoding, so
+swapping the artwork fails loudly and names both digests rather than silently
+regenerating against a new image.
 
 **Pillow is canonical.** macOS `sips` is kept as a no-install fallback but
 resamples differently: measured against the same source, the two decoders
@@ -307,18 +321,19 @@ disagree on 40.6% of asset bytes (mean delta 1.7/255 — visually identical,
 byte-wise unusable for an exact check). The script warns loudly when it falls
 back.
 
-The release workflow runs `--check` as a gate job before the build matrix
-(`.github/workflows/release.yml`), so no tag can ship an asset that disagrees
-with its source artwork. It catches the one silent failure here: artwork swapped
-without regenerating, which would otherwise compile cleanly and ship the
-previous image. Because the gate precedes the matrix, a failure produces no
-artifacts and no partial release.
+`--check` runs as a CI gate in two places, both already wired up:
 
-Gating at release rather than on PRs is deliberate: a tag cut from any branch is
-checked, whereas a PR-triggered check only covers commits that reach `main`
-through a PR. The trade is later feedback — a stale asset fails after tagging,
-and recovery means fixing the asset then re-pointing the tag. Run
-`--check` locally before tagging to avoid that.
+- **On PRs and pushes to `main`** (`.github/workflows/ci.yml`) — catches a stale
+  asset while a human is still reviewing, when the change can simply be fixed in
+  the branch.
+- **On tags, before the build matrix** (`.github/workflows/release.yml`) — a tag
+  can be cut from any commit, so this is what actually guarantees no release
+  ships an asset that disagrees with its source. Because the gate precedes the
+  matrix, a failure produces no artifacts and no partial release.
+
+Together they catch the one silent failure here: artwork swapped without
+regenerating, which would otherwise compile cleanly and ship the previous image.
+Running `--check` locally before tagging still saves a round trip.
 
 A *missing* asset needs no guard — `include_bytes!` already fails the build with
 the path in the error.
@@ -340,12 +355,18 @@ it.
 
 | Phase | Window | What happens |
 |---|---|---|
-| 1. Static | 0.00–0.35 s | All letter cells, flat grey. No image information present. |
-| 2. Ghost | 0.35–1.40 s | Letter colours ramp from grey into the photograph's own palette. The LM appears *latent* in the letter field before any shape resolves. |
-| 3. Resolve | 1.40–2.30 s | Cells flip letter → photo on a jittered top-down sweep. |
-| 4. Hold | 2.30–3.10 s | Full photograph. |
-| 5. Settle | 3.10–3.80 s | Cells revert to letters and drain toward black; wordmark cells lock to their correct letter and brighten. |
-| 6. Wordmark | 3.80–4.20 s | `deltav` alone. |
+| 1. Static | 0.00–0.15 s | All letter cells, flat grey. No image information present. |
+| 2. Ghost | 0.15–1.20 s | Letter colours ramp from grey into the photograph's own palette. The LM appears *latent* in the letter field before any shape resolves. |
+| 3. Resolve | 1.20–2.10 s | Cells flip letter → photo on a jittered top-down sweep. |
+| 4. Hold | 2.10–2.90 s | Full photograph. |
+| 5. Settle | 2.90–3.60 s | Cells revert to letters and drain toward black; wordmark cells lock to their correct letter and brighten. |
+| 6. Wordmark | 3.60–4.20 s | `deltav` alone — reaching full brightness at 3.85 s, then **held** for 0.35 s. |
+
+The wordmark's brightness ramp is a **separate 0.25 s constant**
+(`WORDMARK_RAMP_SECS`), not the length of phase 6. Ramping across the whole phase
+spends all of it arriving, so peak brightness lands on the cut to the list and
+the finished mark is never actually seen — which is what §12.1 was really
+observing. Lengthening the phase alone would only have slowed the arrival.
 
 Cell ordering comes from a deterministic hash, so it is stable frame to frame
 and unit-testable:
@@ -382,11 +403,12 @@ strokes drawn with the same six characters the noise field is made of.
 
 ### 6.4 Skip hint — LOCKED
 
-`▶ PRESS ANY KEY TO SKIP…`, centred one row below the panel. Fades in at ~1.0 s,
-then blinks on a ~500 ms cycle, derived from elapsed time (R3, no timer of its
-own). It advertises only the any-key skip already specified in §5 and adds no
-new input handling. Hidden once the settle phase begins, so it never competes
-with the wordmark.
+`▶ PRESS ANY KEY TO SKIP…`, centred on the panel's **bottom border** as a
+`Block::title_bottom` (§12.2). Fades in at ~1.0 s, then blinks on a ~500 ms
+cycle, derived from elapsed time (R3, no timer of its own). It advertises only
+the any-key skip already specified in §5 and adds no new input handling. Hidden
+once the settle phase begins — the title simply goes empty, leaving a plain
+border — so it never competes with the wordmark.
 
 ### 6.5 Colour: truecolor and fallback
 
@@ -404,8 +426,10 @@ Three tiers, degrading to nothing rather than to something broken:
 Nothing is ever skipped outright: the lowest tier still gets a branded opening,
 just not a photographic one.
 
-- **`style.rs` is untouched.** The splash's colours come from the asset; the
-  semantic palette still governs the skip hint and everything after the splash.
+- **The image's colours come entirely from the asset.** The only semantic
+  palette the splash reads is the border's `DarkGray` (§12.2), which is
+  available in every tier and so needs no tier handling; `style.rs` itself is
+  unchanged.
 - **The greyscale map is precomputed** when the asset is parsed — one dot
   product per cell across 1440 cells at load, and **zero per-frame work**. It is
   strictly less work than the palette search this section used to specify.
@@ -487,10 +511,15 @@ python3 tools/splash/splash_prototype.py --static 0.15 --hold 1.2   # retime
 ```
 
 Every phase duration in §6.2 is overridable (`--static`, `--ghost`, `--resolve`,
-`--hold`, `--settle`, `--wordmark`), so alternative timings are judged by
-watching rather than argued on paper. The prototype prints the derived timeline
-whenever it differs from the defaults. **Whatever is locked in §6.2 must match
-the prototype's `PHASES` defaults** — they are the signed-off timing.
+`--hold`, `--settle`, `--wordmark`), as is the wordmark brightness ramp
+(`--ramp`, where `0` means "ramp across the whole phase"), so alternative
+timings are judged by watching rather than argued on paper. The prototype prints
+the derived timeline whenever it differs from the defaults. **Whatever is locked
+in §6.2 must match the prototype's `PHASES` and `WORDMARK_RAMP` defaults** —
+they are the signed-off timing.
+
+`--no-border` drops the §12.2 frame and puts the hint on its own row below the
+panel, the layout v1 shipped with, for A/B against the bordered default.
 
 `--tier` previews each colour tier from §6.5, emitting that tier's real escape
 codes rather than a truecolor imitation, so a preview shows what the terminal
@@ -532,8 +561,11 @@ off.
 - **Renderer:** ratatui's `TestBackend` + `Buffer` assertions to snapshot a few
   representative frames (static, ghost, hold, wordmark). Because nothing is
   resampled at runtime, these snapshots are byte-identical run to run.
-- **Centring:** on an oversized area the panel's origin is
-  `((w - 72) / 2, (h - 22) / 2)`; on exactly 80×24 it lands at the §6.0 budget.
+- **Centring:** on an oversized area the bordered block's origin is
+  `((w - 74) / 2, (h - 22) / 2)` and the panel sits one cell inside it; on
+  exactly 80×24 the block lands at `(3, 1)` and the panel at `(4, 2)`, the §6.0
+  budget. Note the panel's *x* is unchanged by the border at any width — only
+  *y* shifts down a row.
 - **Loop integration:** assert `is_animating()` gating — the frame branch is inert
   off the splash; a keypress transitions `Splash → List` and is consumed.
 - **Config:** an omitted `disable_startup_splash` deserialises to `false` (splash
@@ -607,10 +639,22 @@ Follows the existing `UiConfig` default + `#[serde(default)]` pattern
       substantially on screen from ~1.4 s to ~3.8 s across resolve, hold and
       settle, so the pure hold reads longer in motion than on paper. Retiming
       remains a one-line change to `PHASES` if that judgement changes.
+- [x] **Wordmark hold: 0.6 s phase with a 0.25 s ramp, total still 4.2 s**
+      (§12.1). Funded by trimming static 0.35 → 0.15 — the slack §9's
+      hold-length entry had already identified as costing nothing — so the
+      total is unchanged and no startup gets longer. Decoupling the ramp from
+      the phase is the part that actually delivers the beat; see §6.2.
+- [x] **Bordered panel, hint on the bottom edge** (§12.2, option B). Reuses
+      `TitleBar` so the splash wears the same rounded `DarkGray` frame as the
+      list and detail views, and keeps both margin rows by rendering the hint
+      as chrome rather than as a row of content.
 
 **Still open:** none. §11 is unblocked.
 
 ## 10. Future work (explicitly deferred)
+
+Ideas parked before v1 shipped. For the two refinements that came *out* of
+running v1, see §12.
 
 - **Extended first-run splash.** A longer, richer variant shown *only* the first
   time the app is ever started on an installation (e.g. a welcome/tagline beat and
@@ -659,3 +703,79 @@ Follows the existing `UiConfig` default + `#[serde(default)]` pattern
 9. Tests (§7) green; `cargo clippy` clean; run against
    `tools/splash/splash_prototype.py` side by side to confirm the timing and
    the two transitions match the signed-off mock.
+
+---
+
+## 12. Post-v1 refinements — DONE
+
+Both came out of watching the shipped v1 in the real app. Neither was a defect —
+v1 behaved as designed — so both were amendments to the design, implemented
+together. The sections above now describe the current behaviour; this one
+records what changed and why, so the reasoning is not lost.
+
+### 12.1 Hold the finished wordmark for longer — DONE
+
+**Observation:** the sequence cut to the list too soon after `deltav` finished
+assembling. The wordmark is the beat the whole animation builds toward, and at
+0.40 s it was gone almost as soon as it was readable.
+
+**The observation was right; the diagnosis was incomplete.** The brightness ramp
+was stretched across the whole wordmark phase, so the mark hit full white
+*exactly on the cut*. Lengthening the phase alone would only have slowed the
+arrival — there would still have been no instant of a finished, held wordmark.
+Two changes, and the second is the one that delivers the beat:
+
+1. **Phase 0.40 → 0.60 s, funded by trimming static 0.35 → 0.15 s.** The total
+   stays 4.20 s, so no startup got longer, and the donor was the slack §9's
+   hold-length entry had already prototyped as costing nothing.
+2. **The ramp became its own 0.25 s constant** (`WORDMARK_RAMP_SECS`), independent
+   of the phase length. Full brightness is reached at 3.85 s and *held* for
+   0.35 s.
+
+The tier asymmetry noted before the work — mono's wordmark was already 25% of
+its 1.60 s sequence against 9.5% for the colour tiers — is why `MONO_PHASES` was
+left alone. The ramp is shared, though, so the mono tier gains a 0.15 s hold for
+free, at no cost to its timing.
+
+**Landed in:** `PHASES` / `WORDMARK_RAMP` in `tools/splash/splash_prototype.py`;
+`STATIC_SECS`, `WORDMARK_SECS`, `WORDMARK_RAMP_SECS` and `wordmark_ramp()` in
+`src/tui/views/splash.rs`; the §6.2 table and §9's duration entries above.
+`mono_tier_runs_the_shorter_sequence` still asserts the 1.6 s and 4.2 s totals
+as literals and still passes untouched — which is the point of funding the extra
+time internally.
+
+### 12.2 Frame the panel in a rounded border — DONE
+
+**Observation:** the list and detail views are framed in a rounded `DarkGray`
+border and the splash was not, so the animation read as detached from the app it
+introduces. The same frame ties the two together.
+
+**Option B, as anticipated.** A border costs 2 rows and 2 columns. Columns were
+easy — 72 + 2 = 74 leaves 3 either side at 80 wide. Rows were the constraint,
+since v1's budget spent all 24:
+
+```
+        v1 layout                   A: border, hint outside      B: hint in the border ✅
+  1   top margin                  ┌ 22  bordered panel        1   top margin
+  20  splash panel                │                           ┌ 22  bordered panel
+  1   (blank)                     1   (blank)                 │     (hint on the bottom edge)
+  1   ▶ PRESS ANY KEY TO SKIP…    1   ▶ PRESS ANY KEY…        └
+  1   bottom margin               └ (no margins left)         1   bottom margin
+  = 24                            = 24                        = 24
+```
+
+Rendering the skip hint as a `Block::title_bottom` keeps both margin rows, drops
+the now-redundant blank spacer, and makes the hint read as chrome — which is
+what it is. §6.4's fade/blink and its disappearance at settle all still apply;
+the title simply goes empty, leaving a plain border. At 24 characters the hint
+sits comfortably inside a 74-wide edge.
+
+`TitleBar` (`src/tui/views/mod.rs`) gained a `bottom()` segment and a `Default`
+impl for the untitled case, so the splash reuses the shared idiom rather than
+hand-rolling a block — the border styling is not duplicated anywhere.
+
+**Landed in:** `TitleBar::bottom` in `src/tui/views/mod.rs`; `block_rect`,
+`BLOCK_COLS` and `render_splash` in `src/tui/views/splash.rs`, with
+`panel_origin` now returning the origin *inside* the border; the centring tests;
+`--no-border` in the prototype for A/B against the v1 layout; the §6.0 budget
+diagram and §6.4/§6.5 above.

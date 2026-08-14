@@ -96,7 +96,10 @@ pub fn check_needs_fetch(app: &App) -> Option<FetchKind> {
     // Auto-fetch based on screen state.
     match active_screen(&app.screen) {
         // List: auto-fetch only when there's no data at all (first run).
-        AppScreen::List => {
+        // The splash plays over the boot fetch and always exits to the list, so
+        // it wants the same data — starting here is what lets the animation
+        // cover the request latency instead of running before it.
+        AppScreen::List | AppScreen::Splash { .. } => {
             if app.launches.is_empty() {
                 debug!("auto-fetching list (no data loaded)");
                 Some(FetchKind::LaunchList)

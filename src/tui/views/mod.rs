@@ -4,6 +4,7 @@ pub mod detail;
 pub mod filter;
 pub mod help;
 pub mod list;
+pub mod splash;
 pub mod status_bar;
 
 use ratatui::layout::Alignment;
@@ -15,11 +16,14 @@ use ratatui::widgets::{Block, BorderType, Borders};
 /// left, center, and right title segments.
 ///
 /// All bordered view components should use this to ensure consistent
-/// rounded borders and `DarkGray` styling.
+/// rounded borders and `DarkGray` styling. [`TitleBar::default`] is the bare
+/// frame, for blocks whose only label rides the bottom edge.
+#[derive(Default)]
 pub struct TitleBar {
     left: Option<Line<'static>>,
     center: Option<Line<'static>>,
     right: Option<Line<'static>>,
+    bottom: Option<Line<'static>>,
 }
 
 impl TitleBar {
@@ -27,8 +31,7 @@ impl TitleBar {
     pub fn new(left: Line<'static>) -> Self {
         Self {
             left: Some(left),
-            center: None,
-            right: None,
+            ..Self::default()
         }
     }
 
@@ -41,6 +44,12 @@ impl TitleBar {
     /// Set the right-aligned title segment.
     pub fn right(mut self, right: Line<'static>) -> Self {
         self.right = Some(right);
+        self
+    }
+
+    /// Set a centered segment on the bottom edge of the border.
+    pub fn bottom(mut self, bottom: Line<'static>) -> Self {
+        self.bottom = Some(bottom);
         self
     }
 
@@ -59,6 +68,9 @@ impl TitleBar {
         }
         if let Some(right) = self.right {
             block = block.title_top(right.alignment(Alignment::Right));
+        }
+        if let Some(bottom) = self.bottom {
+            block = block.title_bottom(bottom.alignment(Alignment::Center));
         }
 
         block
