@@ -130,8 +130,8 @@ impl FilterOption for RegionFilter {
 }
 
 impl RegionFilter {
-    /// LL2 `pad__location` query parameter value, if filtering.
-    pub fn pad_location(self) -> Option<String> {
+    /// LL2 `location__ids` query parameter value, if filtering.
+    pub fn location_ids(self) -> Option<String> {
         let name = match self {
             Self::All => return None,
             Self::US => "US",
@@ -272,7 +272,7 @@ impl FilterState {
     /// Apply this filter state to a [`ListParams`] for API requests.
     pub fn apply_to_params(&self, params: &mut ListParams, now: DateTime<Utc>) {
         params.status_ids = self.status.status_ids();
-        params.pad_location = self.region.pad_location();
+        params.location_ids = self.region.location_ids();
         params.is_crewed = self.is_crewed.is_crewed();
         params.net_lt = self.date_range.net_lt(now);
     }
@@ -409,21 +409,37 @@ mod tests {
     }
 
     #[test]
-    fn region_filter_pad_location_all_returns_none() {
-        assert_eq!(RegionFilter::All.pad_location(), None);
+    fn region_filter_location_ids_all_returns_none() {
+        assert_eq!(RegionFilter::All.location_ids(), None);
     }
 
     #[test]
-    fn region_filter_pad_location_us_returns_ids() {
-        let loc = RegionFilter::US.pad_location().unwrap();
-        assert!(loc.contains("12")); // Kennedy Space Center
+    fn region_filter_location_ids_us_returns_ids() {
+        let loc = RegionFilter::US.location_ids().unwrap();
+        assert!(loc.contains("12")); // Cape Canaveral SFS
         assert!(loc.contains(','));
     }
 
     #[test]
-    fn region_filter_pad_location_india_returns_single_id() {
-        let loc = RegionFilter::India.pad_location().unwrap();
+    fn region_filter_location_ids_india_returns_single_id() {
+        let loc = RegionFilter::India.location_ids().unwrap();
         assert_eq!(loc, "14");
+    }
+
+    /// Every region must resolve — a name typo in `location_ids()` would
+    /// silently yield `None`, disabling that region's filter entirely.
+    #[test]
+    fn every_region_variant_resolves_to_ids() {
+        for &region in RegionFilter::all() {
+            if region.is_default() {
+                continue;
+            }
+            assert!(
+                region.location_ids().is_some(),
+                "{} did not resolve to location IDs",
+                region.label()
+            );
+        }
     }
 
     #[test]
@@ -569,7 +585,7 @@ mod tests {
         let now = Utc::now();
         f.apply_to_params(&mut params, now);
         assert!(params.status_ids.is_none());
-        assert!(params.pad_location.is_none());
+        assert!(params.location_ids.is_none());
         assert!(params.is_crewed.is_none());
         assert!(params.net_lt.is_none());
     }
@@ -587,7 +603,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 3, 1, 12, 0, 0).unwrap();
         f.apply_to_params(&mut params, now);
         assert_eq!(params.status_ids, Some("1".into()));
-        assert!(params.pad_location.is_some());
+        assert!(params.location_ids.is_some());
         assert_eq!(params.is_crewed, Some(true));
         assert!(params.net_lt.is_some());
     }

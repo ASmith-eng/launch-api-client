@@ -1,7 +1,11 @@
-//! Geographical region to `pad__location` ID mappings for Launch Library 2.
+//! Geographical region to location ID mappings for Launch Library 2.
 //!
-//! These location IDs are used as filter values for the `pad__location` query
+//! These location IDs are used as filter values for the `location__ids` query
 //! parameter when calling the LL2 launches API.
+//!
+//! LL2 has three locations with no country — "Sea Launch", "Air launch to
+//! orbit", and "Air launch to Suborbital flight". They belong to no region, so
+//! air- and sea-launched missions are absent from every region filter.
 
 /// A named region with its associated LL2 location IDs.
 #[derive(Debug, Clone)]
@@ -12,37 +16,45 @@ pub struct Region {
 
 /// All known geographical regions and their LL2 location IDs.
 ///
-/// Location IDs sourced from the Launch Library 2 API `/location/` endpoint.
-/// These group launch sites by broad geographical region for the filter panel.
+/// Location IDs sourced from the Launch Library 2 API `/locations/` endpoint,
+/// filtered to `active` sites — inactive ones (Svobodny, the French Algeria
+/// test centre) never appear in upcoming launches.
 pub static REGIONS: &[Region] = &[
     Region {
         name: "US",
         location_ids: &[
-            12,  // Kennedy Space Center, FL
-            27,  // Vandenberg SFB, CA
-            20,  // Cape Canaveral SFS, FL
-            143, // Wallops Island, VA
-            184, // Starbase, TX (SpaceX Boca Chica)
-            11,  // Mojave Air and Space Port, CA
-            144, // Mid-Atlantic Regional Spaceport (MARS), VA
-            98,  // Pacific Spaceport Complex, AK
+            12,  // Cape Canaveral SFS, FL
+            11,  // Vandenberg SFB, CA
+            27,  // Kennedy Space Center, FL
+            21,  // Wallops Flight Facility, VA
+            29,  // Corn Ranch, Van Horn, TX (Blue Origin New Shepard)
+            143, // SpaceX Starbase, TX
+            25,  // Pacific Spaceport Complex, AK
+            155, // White Sands Missile Range, NM
+            31,  // Spaceport America, NM
+            1,   // Pacific Missile Range Facility, HI
+            162, // Edwards Air Force Base, CA
         ],
     },
     Region {
         name: "Europe",
         location_ids: &[
-            13, // Guiana Space Centre, French Guiana
-            33, // Esrange, Sweden (Rocket Factory Augsburg)
-            46, // Andøya, Norway
-            36, // SaxaVord Spaceport, UK
+            13,  // Guiana Space Centre, French Guiana (ESA)
+            178, // Esrange Space Center, Sweden
+            161, // Andøya Spaceport, Norway
+            157, // SaxaVord Spaceport, UK
+            159, // Sutherland Spaceport, UK
+            163, // El Arenosillo Test Centre, Spain
         ],
     },
     Region {
         name: "Russia/Kazakhstan",
         location_ids: &[
+            6,  // Plesetsk Cosmodrome, Russia
             15, // Baikonur Cosmodrome, Kazakhstan
-            18, // Plesetsk Cosmodrome, Russia
-            35, // Vostochny Cosmodrome, Russia
+            30, // Kapustin Yar, Russia
+            18, // Vostochny Cosmodrome, Russia
+            5,  // Dombarovskiy, Russia
         ],
     },
     Region {
@@ -50,9 +62,9 @@ pub static REGIONS: &[Region] = &[
         location_ids: &[
             17,  // Jiuquan Satellite Launch Center
             16,  // Xichang Satellite Launch Center
-            25,  // Wenchang Space Launch Site
-            34,  // Taiyuan Satellite Launch Center
-            199, // Haiyang (sea launch)
+            19,  // Taiyuan Satellite Launch Center
+            8,   // Wenchang Space Launch Site
+            185, // Haiyang Oriental Spaceport
         ],
     },
     Region {
@@ -64,14 +76,16 @@ pub static REGIONS: &[Region] = &[
     Region {
         name: "Japan",
         location_ids: &[
-            24, // Tanegashima Space Center
-            26, // Uchinoura Space Center
+            26,  // Tanegashima Space Center
+            24,  // Uchinoura Space Center
+            32,  // Hokkaido Spaceport
+            166, // Spaceport Kii
         ],
     },
     Region {
         name: "New Zealand",
         location_ids: &[
-            188, // Rocket Lab Launch Complex, Mahia Peninsula
+            10, // Rocket Lab Launch Complex 1, Mahia Peninsula
         ],
     },
 ];

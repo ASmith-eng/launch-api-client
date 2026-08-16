@@ -1024,7 +1024,7 @@ mod tests {
             .and(path("/launches/upcoming/"))
             .and(query_param("status__ids", "1,2"))
             .and(query_param("is_crewed", "true"))
-            .and(query_param("pad__location__in", "27,12"))
+            .and(query_param("location__ids", "27,12"))
             .and(query_param("limit", "10"))
             .and(query_param("offset", "5"))
             .respond_with(
@@ -1038,7 +1038,7 @@ mod tests {
             offset: 5,
             status_ids: Some("1,2".into()),
             is_crewed: Some(true),
-            pad_location: Some("27,12".into()),
+            location_ids: Some("27,12".into()),
             net_gt: None,
             net_lt: None,
             search: None,
