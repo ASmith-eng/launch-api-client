@@ -457,7 +457,6 @@ pub struct Ll2Program {
 /// }
 /// ```
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct Ll2ThrottleResponse {
     pub your_request_limit: u32,
     pub current_use: u32,
@@ -465,6 +464,11 @@ pub struct Ll2ThrottleResponse {
     pub limit_frequency_secs: Option<u32>,
     #[serde(default)]
     pub next_use_secs: Option<u32>,
+    /// Whichever identity the server rate-limited this call under. For an
+    /// authenticated client that is the API key itself, so this must never
+    /// reach a log verbatim — see `ident_for_log`.
+    #[serde(default)]
+    pub ident: Option<String>,
 }
 
 #[cfg(test)]
@@ -639,6 +643,18 @@ mod tests {
         assert_eq!(resp.current_use, 5);
         assert_eq!(resp.limit_frequency_secs, Some(3600));
         assert_eq!(resp.next_use_secs, Some(0));
+        assert_eq!(resp.ident.as_deref(), Some("88.97.214.56"));
+    }
+
+    #[test]
+    fn deserialize_throttle_response_without_optional_fields() {
+        let json = r#"{ "your_request_limit": 15, "current_use": 5 }"#;
+
+        let resp: Ll2ThrottleResponse = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(resp.your_request_limit, 15);
+        assert!(resp.limit_frequency_secs.is_none());
+        assert!(resp.next_use_secs.is_none());
+        assert!(resp.ident.is_none());
     }
 
     #[test]

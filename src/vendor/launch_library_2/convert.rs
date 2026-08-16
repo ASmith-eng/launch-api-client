@@ -817,6 +817,7 @@ mod tests {
             current_use: 5,
             limit_frequency_secs: Some(3600),
             next_use_secs: Some(0),
+            ident: Some("88.97.214.56".into()),
         };
 
         let status: ThrottleStatus = resp.into();
@@ -831,6 +832,7 @@ mod tests {
             current_use: 15,
             limit_frequency_secs: None,
             next_use_secs: None,
+            ident: None,
         };
 
         let status: ThrottleStatus = resp.into();
@@ -844,6 +846,7 @@ mod tests {
             current_use: 20,
             limit_frequency_secs: None,
             next_use_secs: None,
+            ident: None,
         };
 
         let status: ThrottleStatus = resp.into();
