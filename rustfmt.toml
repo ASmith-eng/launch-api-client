@@ -1,3 +1,2 @@
-# Pinned independently of Cargo's `edition = "2021"`: the tree was written in
-# 2024 style, and pinning here keeps formatting stable across an edition bump.
 style_edition = "2024"
+fn_call_width = 80
