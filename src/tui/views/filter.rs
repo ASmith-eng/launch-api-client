@@ -88,14 +88,8 @@ fn build_categories_line(filter: &FilterState) -> Line<'static> {
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(
-                format!("{name}: "),
-                Style::default().fg(Color::DarkGray),
-            ));
-            spans.push(Span::styled(
-                value.to_string(),
-                Style::default().fg(Color::White),
-            ));
+            spans.push(Span::styled(format!("{name}: "), Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(value.to_string(), Style::default().fg(Color::White)));
         }
 
         if i < categories.len() - 1 {
@@ -132,9 +126,7 @@ fn build_hints_right() -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::filter::{
-        CrewedFilter, DateRangeFilter, RegionFilter, StatusFilter,
-    };
+    use crate::tui::filter::{CrewedFilter, DateRangeFilter, RegionFilter, StatusFilter};
 
     #[test]
     fn categories_line_highlights_active() {

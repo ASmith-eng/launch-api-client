@@ -16,6 +16,7 @@ use crate::tui::views::detail;
 use crate::tui::views::filter;
 use crate::tui::views::help::{self, HelpContext};
 use crate::tui::views::list;
+use crate::tui::views::splash;
 
 /// Render the current app state to the terminal.
 pub fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
@@ -29,6 +30,14 @@ pub fn render(terminal: &mut Tui, app: &App) -> Result<(), AppError> {
             }
 
             match &app.screen {
+                AppScreen::Splash { started_at } => {
+                    splash::render_splash(
+                        frame,
+                        area,
+                        started_at.elapsed(),
+                        splash::ColourTier::detect(),
+                    );
+                }
                 AppScreen::List => list::render_list(frame, area, app),
                 AppScreen::Detail(id) => detail::render_detail(frame, area, id, app),
                 AppScreen::Help(prev) => {
@@ -67,9 +76,7 @@ fn render_size_warning(frame: &mut ratatui::Frame, area: Rect) {
         Line::raw(""),
         Line::raw("  Terminal window too small."),
         Line::raw(""),
-        Line::raw(format!(
-            "  Please resize to at least {MIN_COLS}x{MIN_ROWS}"
-        )),
+        Line::raw(format!("  Please resize to at least {MIN_COLS}x{MIN_ROWS}")),
         Line::raw("  to start seeing rockets!"),
         Line::raw(""),
     ]);
@@ -91,10 +98,7 @@ fn render_error(frame: &mut ratatui::Frame, area: Rect, error_state: &ErrorState
     let msg = match error_state {
         ErrorState::Transient { message, .. } => format!("Error: {message}"),
         ErrorState::RateLimited { available_at } => {
-            format!(
-                "Rate limited — resets at {}",
-                available_at.format("%H:%M:%S UTC")
-            )
+            format!("Rate limited — resets at {}", available_at.format("%H:%M:%S UTC"))
         }
         ErrorState::Offline => "Network offline".to_string(),
         ErrorState::RequestCapExceeded => {

@@ -24,7 +24,7 @@ use std::time::Duration;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use tokio::signal;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::debug;
 
 use crate::api::client::Ll2Client;
@@ -34,12 +34,13 @@ use crate::config::CacheConfig;
 use crate::error::AppError;
 use crate::tui::app::{App, AppScreen};
 use crate::tui::fetch::{
-    check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors, handle_fetch_result,
-    maybe_load_detail_from_disk, spawn_fetch, FetchResult,
+    FetchResult, check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors,
+    handle_fetch_result, maybe_load_detail_from_disk, spawn_fetch,
 };
 use crate::tui::keys::handle_key;
 use crate::tui::render::render;
 use crate::tui::terminal::Tui;
+use crate::tui::views::splash;
 
 /// Run the main event loop until the user quits.
 ///
@@ -62,6 +63,12 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
     // longer than 1 s (e.g. during a slow API call).
     let mut tick = interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    // Frame timer for the splash animation. Gated below to the animated screen,
+    // so once the splash exits the branch is never polled again.
+    let mut frame_tick = interval(Duration::from_millis(splash::FRAME_MS));
+    frame_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let splash_duration = splash::ColourTier::detect().duration();
 
     loop {
         // Auto-dismiss transient errors.
@@ -128,6 +135,19 @@ pub async fn run_event_loop<C: Clock + Send + Sync + 'static>(
                 // No state change needed — countdown is computed at render
                 // time from the launch's `net` field. The next loop iteration
                 // will call `render()`.
+            }
+
+            // Splash frame tick. The frame itself is derived from elapsed time
+            // at render, so this only wakes the loop and retires the splash
+            // once its sequence has run its full length.
+            _ = frame_tick.tick(), if app.screen.is_animating() => {
+                let finished = matches!(
+                    &app.screen,
+                    AppScreen::Splash { started_at } if started_at.elapsed() >= splash_duration
+                );
+                if finished {
+                    app.screen = AppScreen::List;
+                }
             }
         }
 

@@ -22,7 +22,9 @@ pub fn status_style(id: u32) -> Option<StatusStyle> {
         1 => StatusStyle {
             name: "Go for Launch",
             abbrev: "Go",
-            style: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            style: Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         },
         2 => StatusStyle {
             name: "To Be Determined",
@@ -42,12 +44,16 @@ pub fn status_style(id: u32) -> Option<StatusStyle> {
         5 => StatusStyle {
             name: "On Hold",
             abbrev: "Hold",
-            style: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            style: Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         },
         6 => StatusStyle {
             name: "In Flight",
             abbrev: "In Flight",
-            style: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            style: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         },
         7 => StatusStyle {
             name: "Partial Failure",

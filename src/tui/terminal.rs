@@ -7,11 +7,9 @@
 use std::io::{self, Stdout};
 
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::terminal::{
-    self, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 /// Type alias for the terminal backend used throughout the TUI.
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -50,11 +48,7 @@ pub fn setup_terminal() -> io::Result<(Tui, TerminalGuard)> {
 /// fails during teardown.
 fn restore_terminal() -> io::Result<()> {
     terminal::disable_raw_mode()?;
-    crossterm::execute!(
-        io::stdout(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    crossterm::execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }
 

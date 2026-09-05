@@ -14,7 +14,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::{rate_limit_title, TitleBar};
+use crate::tui::views::{TitleBar, rate_limit_title};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Height of a single launch item in lines (name + provider + blank separator).
@@ -34,7 +34,8 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     }
 
     if app.launches.is_empty() {
-        let empty = Paragraph::new("  No launches to display.").style(style::label());
+        let empty = Paragraph::new(empty_list_message(app.filter_state.region_has_no_sites()))
+            .style(style::label());
         frame.render_widget(empty, inner);
         return;
     }
@@ -47,6 +48,18 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 
     render_launch_items(frame, list_area, app);
     render_hint_bar(frame, hint_area, app);
+}
+
+/// Text shown in place of the list when there is nothing to show.
+///
+/// An empty region is attributed to the provider rather than reported as a
+/// failure — no request was made, and retrying cannot change the answer.
+fn empty_list_message(region_has_no_sites: bool) -> &'static str {
+    if region_has_no_sites {
+        "  This region has no launch sites registered with the data provider."
+    } else {
+        "  No launches to display."
+    }
 }
 
 /// Build the outer block with three independently aligned title segments:
@@ -228,10 +241,7 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     ];
 
     if app.total_pages() > 1 {
-        left_spans.extend([
-            Span::styled("n/p", key),
-            Span::styled(": Page · ", desc),
-        ]);
+        left_spans.extend([Span::styled("n/p", key), Span::styled(": Page · ", desc)]);
     }
 
     left_spans.extend([
@@ -377,12 +387,10 @@ mod tests {
 
     // --- TestBackend rendering tests ---
 
+    use crate::models::{LaunchStatus, LocationInfo, NetPrecision, PadInfo, Provider};
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use ratatui::Terminal;
-    use crate::models::{
-        LaunchStatus, LocationInfo, PadInfo, Provider, NetPrecision,
-    };
 
     fn make_test_terminal(width: u16, height: u16) -> Terminal<TestBackend> {
         let backend = TestBackend::new(width, height);
@@ -455,6 +463,18 @@ mod tests {
     }
 
     #[test]
+    fn empty_message_attributes_a_siteless_region_to_the_provider() {
+        let msg = empty_list_message(true);
+        assert!(msg.contains("no launch sites"), "got: {msg}");
+        assert!(msg.contains("data provider"), "got: {msg}");
+    }
+
+    #[test]
+    fn empty_message_defaults_to_no_launches() {
+        assert!(empty_list_message(false).contains("No launches to display"));
+    }
+
+    #[test]
     fn render_loading_empty_list_shows_fetching_message() {
         let mut terminal = make_test_terminal(100, 30);
         let mut app = App::new((100, 30));
@@ -487,18 +507,9 @@ mod tests {
             .unwrap();
 
         let text = buffer_text(&terminal);
-        assert!(
-            text.contains("[Go]"),
-            "list should render status badge [Go], got:\n{text}"
-        );
-        assert!(
-            text.contains("Falcon 9"),
-            "list should render launch name, got:\n{text}"
-        );
-        assert!(
-            text.contains("SpaceX"),
-            "list should render provider name, got:\n{text}"
-        );
+        assert!(text.contains("[Go]"), "list should render status badge [Go], got:\n{text}");
+        assert!(text.contains("Falcon 9"), "list should render launch name, got:\n{text}");
+        assert!(text.contains("SpaceX"), "list should render provider name, got:\n{text}");
     }
 
     #[test]
@@ -515,10 +526,7 @@ mod tests {
             .unwrap();
 
         let text = buffer_text(&terminal);
-        assert!(
-            text.contains("[TBD]"),
-            "list should render status badge [TBD], got:\n{text}"
-        );
+        assert!(text.contains("[TBD]"), "list should render status badge [TBD], got:\n{text}");
     }
 
     #[test]

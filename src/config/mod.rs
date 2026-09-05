@@ -115,6 +115,8 @@ pub struct UiConfig {
     pub staleness_style: StalenessStyle,
     /// Number of launches per page.
     pub launches_per_page: u32,
+    /// Opt out of the startup splash animation.
+    pub disable_startup_splash: bool,
 }
 
 /// Logging settings.
@@ -130,7 +132,6 @@ pub struct LogConfig {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
-
 
 impl Default for CacheConfig {
     fn default() -> Self {
@@ -153,6 +154,7 @@ impl Default for UiConfig {
             time_format: TimeFormat::TwelveHour,
             staleness_style: StalenessStyle::Relative,
             launches_per_page: 25,
+            disable_startup_splash: false,
         }
     }
 }
@@ -194,11 +196,35 @@ impl CacheConfig {
         let defaults = Self::default();
 
         // TTL values: must be 1–43 200 (30 days)
-        sanitize_range("ttl_far_future", &mut self.ttl_far_future, 1, MAX_TTL_MINUTES, defaults.ttl_far_future);
-        sanitize_range("ttl_near_future", &mut self.ttl_near_future, 1, MAX_TTL_MINUTES, defaults.ttl_near_future);
-        sanitize_range("ttl_imminent", &mut self.ttl_imminent, 1, MAX_TTL_MINUTES, defaults.ttl_imminent);
+        sanitize_range(
+            "ttl_far_future",
+            &mut self.ttl_far_future,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_far_future,
+        );
+        sanitize_range(
+            "ttl_near_future",
+            &mut self.ttl_near_future,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_near_future,
+        );
+        sanitize_range(
+            "ttl_imminent",
+            &mut self.ttl_imminent,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_imminent,
+        );
         sanitize_range("ttl_active", &mut self.ttl_active, 1, MAX_TTL_MINUTES, defaults.ttl_active);
-        sanitize_range("ttl_launch_list", &mut self.ttl_launch_list, 1, MAX_TTL_MINUTES, defaults.ttl_launch_list);
+        sanitize_range(
+            "ttl_launch_list",
+            &mut self.ttl_launch_list,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_launch_list,
+        );
 
         // Pruning: age and count have a minimum of 1, no enforced max
         sanitize_min_u32(
@@ -578,7 +604,10 @@ prune_every_n_startups = 51
         .unwrap();
 
         let config = load_config(&path);
-        assert_eq!(config.cache.prune_every_n_startups, CacheConfig::default().prune_every_n_startups);
+        assert_eq!(
+            config.cache.prune_every_n_startups,
+            CacheConfig::default().prune_every_n_startups
+        );
     }
 
     #[test]
@@ -819,5 +848,44 @@ file = "my-app.log"
         // Second call should not fail
         app_dirs.ensure_dirs().unwrap();
         assert!(app_dirs.config_dir.is_dir());
+    }
+
+    // --- Splash opt-out ---
+
+    fn ui_config_from(toml: &str) -> UiConfig {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, toml).unwrap();
+        load_config(&path).ui
+    }
+
+    #[test]
+    fn splash_is_on_when_the_key_is_omitted() {
+        let ui = ui_config_from(
+            r#"
+[ui]
+time_format = "24h"
+"#,
+        );
+        assert!(!ui.disable_startup_splash);
+    }
+
+    #[test]
+    fn splash_is_on_when_there_is_no_ui_table_at_all() {
+        assert!(!ui_config_from("").disable_startup_splash);
+        assert!(!UiConfig::default().disable_startup_splash);
+    }
+
+    #[test]
+    fn splash_can_be_turned_off() {
+        let ui = ui_config_from(
+            r#"
+[ui]
+disable_startup_splash = true
+"#,
+        );
+        assert!(ui.disable_startup_splash);
+        // Sibling keys keep their defaults.
+        assert_eq!(ui.launches_per_page, 25);
     }
 }

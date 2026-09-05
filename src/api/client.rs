@@ -17,7 +17,7 @@ use crate::error::AppError;
 use crate::models::{LaunchDetail, LaunchSummary, ThrottleStatus};
 use crate::vendor::launch_library_2::endpoints::{self, ListParams};
 use crate::vendor::launch_library_2::response_models::{
-    Ll2LaunchDetail, Ll2Launch, Ll2ThrottleResponse, PaginatedResponse,
+    Ll2Launch, Ll2LaunchDetail, Ll2ThrottleResponse, PaginatedResponse,
 };
 
 /// Delay between the first failed attempt and the automatic retry.
@@ -104,9 +104,7 @@ impl<C: Clock> Ll2Client<C> {
     fn request(&self, url: &str) -> reqwest::RequestBuilder {
         let req = self.http.get(url);
         match &self.api_key {
-            Some(key) if !key.is_empty() => {
-                req.header("Authorization", format!("Token {key}"))
-            }
+            Some(key) if !key.is_empty() => req.header("Authorization", format!("Token {key}")),
             _ => req,
         }
     }
@@ -229,6 +227,16 @@ impl<C: Clock> Ll2Client<C> {
                 return Err(AppError::ApiParse(e));
             }
         };
+
+        debug!(
+            your_request_limit = ll2_throttle.your_request_limit,
+            current_use = ll2_throttle.current_use,
+            limit_frequency_secs = ?ll2_throttle.limit_frequency_secs,
+            next_use_secs = ?ll2_throttle.next_use_secs,
+            ident = ident_for_log(self.api_key.as_deref(), ll2_throttle.ident.as_deref()),
+            "throttle response"
+        );
+
         Ok(ll2_throttle.into())
     }
 
@@ -291,11 +299,7 @@ impl<C: Clock> Ll2Client<C> {
     #[cfg(test)]
     pub async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
         let status = self.fetch_throttle_raw().await?;
-        debug!(
-            remaining = status.remaining,
-            limit = status.limit,
-            "throttle sync complete"
-        );
+        debug!(remaining = status.remaining, limit = status.limit, "throttle sync complete");
 
         let mut limiter = self.rate_limiter.lock().await;
         limiter.record_sync(status.remaining, status.limit);
@@ -305,10 +309,7 @@ impl<C: Clock> Ll2Client<C> {
 }
 
 impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
-    async fn fetch_launch_list(
-        &self,
-        params: &ListParams,
-    ) -> Result<LaunchListResponse, AppError> {
+    async fn fetch_launch_list(&self, params: &ListParams) -> Result<LaunchListResponse, AppError> {
         self.check_and_record_request().await?;
 
         let url = endpoints::launches_upcoming_url(&self.base_url, params);
@@ -329,8 +330,7 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         };
 
         let count = paginated.results.len();
-        let launches: Vec<LaunchSummary> =
-            paginated.results.into_iter().map(Into::into).collect();
+        let launches: Vec<LaunchSummary> = paginated.results.into_iter().map(Into::into).collect();
         info!(count, total = paginated.count, "fetched launch list");
         Ok(LaunchListResponse {
             launches,
@@ -362,6 +362,19 @@ impl<C: Clock + Send + Sync> LaunchApi for Ll2Client<C> {
         let detail: LaunchDetail = ll2_detail.into();
         info!(launch_id = id, name = %detail.name, "fetched launch detail");
         Ok(detail)
+    }
+}
+
+/// The rate-limit identity to record in logs.
+///
+/// LL2 echoes back whatever it limited the call under, which for an
+/// authenticated client is the API key itself. The key condition mirrors
+/// [`Ll2Client::request`], so what is masked matches what was actually sent.
+fn ident_for_log<'a>(api_key: Option<&str>, ident: Option<&'a str>) -> &'a str {
+    match (api_key, ident) {
+        (Some(key), _) if !key.is_empty() => "<api key>",
+        (_, Some(ident)) => ident,
+        (_, None) => "<absent>",
     }
 }
 
@@ -493,7 +506,9 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
             .and(query_param("mode", "normal"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -514,7 +529,9 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -536,7 +553,9 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/launches/e3df2ecd-c239-472f-95e4-2b89b4f75800/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_DETAIL_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_DETAIL_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -550,10 +569,7 @@ mod tests {
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
         assert_eq!(detail.provider_total_launches, Some(301));
         assert_eq!(detail.provider_successful_launches, Some(295));
-        assert_eq!(
-            detail.rocket_full_name.as_deref(),
-            Some("Starship (Super Heavy + Starship)")
-        );
+        assert_eq!(detail.rocket_full_name.as_deref(), Some("Starship (Super Heavy + Starship)"));
         assert_eq!(detail.vid_urls.len(), 1);
         assert_eq!(detail.info_urls.len(), 1);
         assert_eq!(detail.programs, vec!["Starship Development"]);
@@ -586,11 +602,17 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api-throttle/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
-        let status = client.fetch_throttle_status().await.expect("should succeed");
+        let status = client
+            .fetch_throttle_status()
+            .await
+            .expect("should succeed");
 
         assert_eq!(status.limit, 15);
         assert_eq!(status.remaining, 12);
@@ -602,7 +624,10 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api-throttle/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -622,7 +647,10 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api-throttle/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(SAMPLE_THROTTLE_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -630,6 +658,26 @@ mod tests {
 
         // After sync, should_sync() should return false (just synced).
         assert!(!client.rate_limiter().await.should_sync());
+    }
+
+    #[test]
+    fn ident_is_logged_verbatim_when_unauthenticated() {
+        assert_eq!(ident_for_log(None, Some("88.97.214.56")), "88.97.214.56");
+        assert_eq!(ident_for_log(Some(""), Some("88.97.214.56")), "88.97.214.56");
+    }
+
+    #[test]
+    fn ident_is_masked_when_it_could_be_the_api_key() {
+        // LL2 echoes the key back as `ident` for authenticated clients, so the
+        // masking must hold whatever the server sends — including an IP.
+        assert_eq!(ident_for_log(Some("secret-key"), Some("secret-key")), "<api key>");
+        assert_eq!(ident_for_log(Some("secret-key"), Some("88.97.214.56")), "<api key>");
+        assert_eq!(ident_for_log(Some("secret-key"), None), "<api key>");
+    }
+
+    #[test]
+    fn absent_ident_is_marked_rather_than_blank() {
+        assert_eq!(ident_for_log(None, None), "<absent>");
     }
 
     // --- Rate limiting tests ---
@@ -640,7 +688,9 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
@@ -668,23 +718,19 @@ mod tests {
         let server = MockServer::start().await;
         let clock = FakeClock::new(base_time());
         let limiter = RateLimiter::new(clock, true);
-        let client = Ll2Client::new(
-            server.uri(),
-            Some("test-api-key-123".into()),
-            limiter,
-        )
-        .unwrap();
+        let client =
+            Ll2Client::new(server.uri(), Some("test-api-key-123".into()), limiter).unwrap();
 
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
             .and(header("Authorization", "Token test-api-key-123"))
-            .respond_with(ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+            )
             .mount(&server)
             .await;
 
-        let result = client
-            .fetch_launch_list(&ListParams::default())
-            .await;
+        let result = client.fetch_launch_list(&ListParams::default()).await;
 
         // If the header doesn't match, wiremock returns 404, so success means
         // the header was sent correctly.
@@ -724,8 +770,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
             )
             .mount(&server)
             .await;
@@ -939,8 +984,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/launches/upcoming/"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(empty_response, "application/json"),
+                ResponseTemplate::new(200).set_body_raw(empty_response, "application/json"),
             )
             .mount(&server)
             .await;
@@ -964,12 +1008,11 @@ mod tests {
             .and(path("/launches/upcoming/"))
             .and(query_param("status__ids", "1,2"))
             .and(query_param("is_crewed", "true"))
-            .and(query_param("pad__location__in", "27,12"))
+            .and(query_param("location__ids", "27,12"))
             .and(query_param("limit", "10"))
             .and(query_param("offset", "5"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
+                ResponseTemplate::new(200).set_body_raw(SAMPLE_LIST_RESPONSE, "application/json"),
             )
             .mount(&server)
             .await;
@@ -979,7 +1022,7 @@ mod tests {
             offset: 5,
             status_ids: Some("1,2".into()),
             is_crewed: Some(true),
-            pad_location: Some("27,12".into()),
+            location_ids: Some("27,12".into()),
             net_gt: None,
             net_lt: None,
             search: None,
@@ -1074,10 +1117,7 @@ mod tests {
         let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
 
         for i in 0..REQUEST_CAP {
-            assert!(
-                client.check_request_cap().await.is_ok(),
-                "request {i} should be allowed"
-            );
+            assert!(client.check_request_cap().await.is_ok(), "request {i} should be allowed");
         }
     }
 

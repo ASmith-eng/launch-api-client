@@ -331,6 +331,15 @@ pub enum StatusFilter {
 }
 
 /// Geographical region filter — persisted as part of [`ActiveFilters`].
+///
+/// The named regions follow how launch activity is conventionally tabulated —
+/// by launching state for the major programmes rather than by continent — and
+/// `Other` is the remainder, so no launch site is unreachable. Which countries
+/// each one covers is decided in `tools/launch_library_2/region-map/regions.toml`.
+///
+/// Variants must appear there too: the generated table matches on this enum, so
+/// adding one here without adding it there is a compile error rather than a
+/// region that silently filters on nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RegionFilter {
     #[default]
@@ -341,7 +350,26 @@ pub enum RegionFilter {
     China,
     India,
     Japan,
-    NewZealand,
+    Oceania,
+    MiddleEast,
+    Korea,
+    SouthAmerica,
+    Other,
+}
+
+/// What a [`RegionFilter`] resolves to against a data provider's site list.
+///
+/// The three cases are kept apart because collapsing the last two into "send no
+/// filter" would show every launch under a region the user explicitly picked —
+/// indistinguishable from the filter being broken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegionSites {
+    /// No region filter selected.
+    Unfiltered,
+    /// Provider site IDs, formatted for its query parameter.
+    Sites(String),
+    /// The region is one we define, but the provider lists no sites in it.
+    NoneRegistered,
 }
 
 /// Crewed mission filter — persisted as part of [`ActiveFilters`].
@@ -369,12 +397,27 @@ pub enum DateRangeFilter {
 pub struct ActiveFilters {
     #[serde(default)]
     pub status: StatusFilter,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "region_or_default")]
     pub region: RegionFilter,
     #[serde(default)]
     pub is_crewed: CrewedFilter,
     #[serde(default)]
     pub date_range: DateRangeFilter,
+}
+
+/// Read a persisted region, falling back to `All` if we no longer define it.
+///
+/// The region list is ours to revise, so a cache written by an older build can
+/// name a region this one has dropped. Without this the derived impl would
+/// reject the whole file as corrupt and throw away a perfectly good launch list
+/// — a wasted request against a volunteer-run API for a filter selection that
+/// costs nothing to forget.
+fn region_or_default<'de, D>(de: D) -> Result<RegionFilter, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let name = String::deserialize(de)?;
+    Ok(serde_json::from_value(serde_json::Value::String(name)).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -466,6 +509,23 @@ pub(crate) mod tests {
         let serialized = serde_json::to_string(&cache).unwrap();
         let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.launches[0].id, cache.launches[0].id);
+    }
+
+    /// `NewZealand` was a region until it folded into `Oceania`. A cache
+    /// written before that must still load — losing a filter selection is
+    /// nothing, but rejecting the file costs a refetch against LL2.
+    #[test]
+    fn retired_region_reads_as_unfiltered() {
+        let json = r#"{"status":"All","region":"NewZealand","is_crewed":"All","date_range":"All"}"#;
+        let filters: ActiveFilters = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(filters.region, RegionFilter::All);
+    }
+
+    #[test]
+    fn current_region_still_round_trips() {
+        let json = r#"{"region":"Oceania"}"#;
+        let filters: ActiveFilters = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(filters.region, RegionFilter::Oceania);
     }
 
     #[test]

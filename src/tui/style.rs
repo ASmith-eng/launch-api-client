@@ -53,18 +53,14 @@ pub fn label() -> Style {
 
 /// Dim separator line style (Tier 3 with DIM modifier).
 pub fn separator() -> Style {
-    Style::default()
-        .fg(CHROME)
-        .add_modifier(Modifier::DIM)
+    Style::default().fg(CHROME).add_modifier(Modifier::DIM)
 }
 
 /// Section heading style (Tier 3 with BOLD modifier).
 ///
 /// Used for `VEHICLE`, `LOCATION`, `MISSION`, `LINKS` headings.
 pub fn section_heading() -> Style {
-    Style::default()
-        .fg(CHROME)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(CHROME).add_modifier(Modifier::BOLD)
 }
 
 // ---------------------------------------------------------------------------
@@ -124,9 +120,7 @@ pub fn link_label() -> Style {
 
 /// Link URL style (Dim + underline).
 pub fn link_url() -> Style {
-    Style::default()
-        .fg(CHROME)
-        .add_modifier(Modifier::DIM)
+    Style::default().fg(CHROME).add_modifier(Modifier::DIM)
 }
 
 // ---------------------------------------------------------------------------

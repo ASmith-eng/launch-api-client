@@ -25,8 +25,8 @@ pub fn launches_upcoming_url(base_url: &str, params: &ListParams) -> String {
     if let Some(crewed) = params.is_crewed {
         url.push_str(&format!("&is_crewed={crewed}"));
     }
-    if let Some(ref loc) = params.pad_location {
-        url.push_str(&format!("&pad__location__in={loc}"));
+    if let Some(ref ids) = params.location_ids {
+        url.push_str(&format!("&location__ids={ids}"));
     }
     if let Some(ref gt) = params.net_gt {
         url.push_str(&format!("&net__gt={gt}"));
@@ -58,7 +58,9 @@ pub struct ListParams {
     pub offset: u32,
     pub status_ids: Option<String>,
     pub is_crewed: Option<bool>,
-    pub pad_location: Option<String>,
+    /// Comma-separated LL2 location IDs. Unknown filter names are silently
+    /// ignored by the API, so this must stay in sync with `location__ids`.
+    pub location_ids: Option<String>,
     pub net_gt: Option<String>,
     pub net_lt: Option<String>,
     pub search: Option<String>,
@@ -71,7 +73,7 @@ impl Default for ListParams {
             offset: 0,
             status_ids: None,
             is_crewed: None,
-            pad_location: None,
+            location_ids: None,
             net_gt: None,
             net_lt: None,
             search: None,
@@ -103,7 +105,7 @@ mod tests {
             offset: 20,
             status_ids: Some("1,2".into()),
             is_crewed: Some(true),
-            pad_location: Some("12".into()),
+            location_ids: Some("12".into()),
             net_gt: Some("2026-01-01".into()),
             net_lt: Some("2026-12-31".into()),
             search: Some("starship".into()),
@@ -115,7 +117,7 @@ mod tests {
         assert!(url.contains("offset=20"));
         assert!(url.contains("status__ids=1,2"));
         assert!(url.contains("is_crewed=true"));
-        assert!(url.contains("pad__location__in=12"));
+        assert!(url.contains("location__ids=12"));
         assert!(url.contains("net__gt=2026-01-01"));
         assert!(url.contains("net__lt=2026-12-31"));
         assert!(url.contains("search=starship"));

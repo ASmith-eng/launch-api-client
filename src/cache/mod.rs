@@ -13,13 +13,13 @@ use std::path::{Path, PathBuf};
 use tokio::io::ErrorKind;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tracing::{debug, warn};
 
 use crate::clock::Clock;
 use crate::config::CacheConfig;
 use crate::error::AppError;
-use crate::models::{AppState, LaunchDetailCache, LaunchListCache, CACHE_VERSION};
+use crate::models::{AppState, CACHE_VERSION, LaunchDetailCache, LaunchListCache};
 
 // ---------------------------------------------------------------------------
 // Cache strategy & TTL
@@ -80,7 +80,6 @@ impl CacheStrategy {
             Self::RealTime => Some(config.ttl_active),
         }
     }
-
 }
 
 /// Compute the `expires_at` timestamp for a given strategy.
@@ -272,7 +271,9 @@ impl<C: Clock> CacheManager<C> {
 /// - The file does not exist (normal cache miss)
 /// - The file has a version mismatch (logged at DEBUG)
 /// - The file contains invalid JSON (logged at WARN)
-async fn load_versioned<T: DeserializeOwned + HasVersion>(path: &Path) -> Result<Option<T>, AppError> {
+async fn load_versioned<T: DeserializeOwned + HasVersion>(
+    path: &Path,
+) -> Result<Option<T>, AppError> {
     let bytes = match tokio::fs::read(path).await {
         Ok(b) => b,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
@@ -358,8 +359,8 @@ mod tests {
     use super::*;
     use crate::clock::testing::FakeClock;
     use crate::models::{
-        tests::dummy_launch_detail, ActiveFilters, LaunchStatus, LaunchSummary, LocationInfo,
-        MissionSummary, PadInfo, Provider, RateLimitState,
+        ActiveFilters, LaunchStatus, LaunchSummary, LocationInfo, MissionSummary, PadInfo,
+        Provider, RateLimitState, tests::dummy_launch_detail,
     };
     use chrono::{TimeDelta, Utc};
     use std::fs;
@@ -523,7 +524,12 @@ mod tests {
     #[tokio::test]
     async fn missing_launch_detail_returns_none() {
         let (mgr, _dir, _clock) = setup();
-        assert!(mgr.load_launch_detail("nonexistent-uuid").await.unwrap().is_none());
+        assert!(
+            mgr.load_launch_detail("nonexistent-uuid")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -611,11 +617,7 @@ mod tests {
     #[tokio::test]
     async fn valid_json_but_wrong_shape_returns_none() {
         let (mgr, dir, _clock) = setup();
-        fs::write(
-            dir.path().join("cache.json"),
-            r#"{"some_other": "structure"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("cache.json"), r#"{"some_other": "structure"}"#).unwrap();
         assert!(mgr.load_launch_list().await.unwrap().is_none());
     }
 
@@ -643,8 +645,16 @@ mod tests {
         mgr.save_launch_detail(&d1).await.unwrap();
         mgr.save_launch_detail(&d2).await.unwrap();
 
-        let loaded1 = mgr.load_launch_detail("aaaa-1111").await.unwrap().expect("d1");
-        let loaded2 = mgr.load_launch_detail("bbbb-2222").await.unwrap().expect("d2");
+        let loaded1 = mgr
+            .load_launch_detail("aaaa-1111")
+            .await
+            .unwrap()
+            .expect("d1");
+        let loaded2 = mgr
+            .load_launch_detail("bbbb-2222")
+            .await
+            .unwrap()
+            .expect("d2");
         assert_eq!(loaded1.data.name, "Starship IFT-7");
         assert_eq!(loaded2.data.name, "Falcon 9");
     }
@@ -698,10 +708,7 @@ mod tests {
         let now = base_time();
         // Status 1 = Go, >7 days away
         let net = now + TimeDelta::days(8);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::LongTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::LongTerm);
     }
 
     #[test]
@@ -709,10 +716,7 @@ mod tests {
         let now = base_time();
         // Status 2 = TBD, 3 days away
         let net = now + TimeDelta::days(3);
-        assert_eq!(
-            CacheStrategy::for_launch(2, net, now),
-            CacheStrategy::MediumTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(2, net, now), CacheStrategy::MediumTerm);
     }
 
     #[test]
@@ -720,10 +724,7 @@ mod tests {
         let now = base_time();
         // Status 1 = Go, 12 hours away
         let net = now + TimeDelta::hours(12);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
     }
 
     // -- Boundary tests ---------------------------------------------------
@@ -733,20 +734,14 @@ mod tests {
         let now = base_time();
         // Exactly 7 days: not strictly >7 days, so MediumTerm
         let net = now + TimeDelta::days(7);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::MediumTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::MediumTerm);
     }
 
     #[test]
     fn strategy_just_over_7_days() {
         let now = base_time();
         let net = now + TimeDelta::days(7) + TimeDelta::seconds(1);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::LongTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::LongTerm);
     }
 
     #[test]
@@ -754,20 +749,14 @@ mod tests {
         let now = base_time();
         // Exactly 24 hours: not strictly >24h, so ShortTerm
         let net = now + TimeDelta::hours(24);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
     }
 
     #[test]
     fn strategy_just_over_24_hours() {
         let now = base_time();
         let net = now + TimeDelta::hours(24) + TimeDelta::seconds(1);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::MediumTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::MediumTerm);
     }
 
     #[test]
@@ -776,10 +765,7 @@ mod tests {
         // Launch NET has passed but status is still "Go" (not yet updated)
         // Negative time-to-launch → ShortTerm (treated as imminent)
         let net = now - TimeDelta::hours(1);
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
     }
 
     #[test]
@@ -787,10 +773,7 @@ mod tests {
         let now = base_time();
         // In-flight even though NET is far away (unusual but possible)
         let net = now + TimeDelta::days(30);
-        assert_eq!(
-            CacheStrategy::for_launch(6, net, now),
-            CacheStrategy::RealTime
-        );
+        assert_eq!(CacheStrategy::for_launch(6, net, now), CacheStrategy::RealTime);
     }
 
     // =====================================================================
@@ -1123,7 +1106,12 @@ mod tests {
         assert_eq!(deleted, 1);
 
         // Old file gone, fresh file remains
-        assert!(mgr.load_launch_detail("fresh-launch").await.unwrap().is_some());
+        assert!(
+            mgr.load_launch_detail("fresh-launch")
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert!(!mgr.detail_path("old-launch").exists());
     }
 
@@ -1148,11 +1136,7 @@ mod tests {
         let config = default_cache_config();
 
         // 30 days + 1 second: just over the limit
-        write_detail_at(
-            &mgr,
-            "just-over",
-            now - TimeDelta::days(30) - TimeDelta::seconds(1),
-        ).await;
+        write_detail_at(&mgr, "just-over", now - TimeDelta::days(30) - TimeDelta::seconds(1)).await;
 
         let deleted = mgr.prune_details(&config).await.unwrap();
         assert_eq!(deleted, 1);
@@ -1173,7 +1157,8 @@ mod tests {
                 &mgr,
                 &format!("launch-{i}"),
                 now - TimeDelta::hours(5 - i), // 0 is oldest, 4 is newest
-            ).await;
+            )
+            .await;
         }
 
         let deleted = mgr.prune_details(&config).await.unwrap();
@@ -1216,11 +1201,7 @@ mod tests {
         // 1 old file (deleted by age), 4 recent files (2 deleted by count)
         write_detail_at(&mgr, "ancient", now - TimeDelta::days(60)).await;
         for i in 0..4 {
-            write_detail_at(
-                &mgr,
-                &format!("recent-{i}"),
-                now - TimeDelta::hours(4 - i),
-            ).await;
+            write_detail_at(&mgr, &format!("recent-{i}"), now - TimeDelta::hours(4 - i)).await;
         }
 
         let deleted = mgr.prune_details(&config).await.unwrap();
@@ -1355,15 +1336,9 @@ mod tests {
         let net = now - TimeDelta::hours(2); // NET was 2 hours ago
 
         // Before launch: Go (status 1) → ShortTerm (past NET, still active)
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
         // After success: status 3 → Permanent
-        assert_eq!(
-            CacheStrategy::for_launch(3, net, now),
-            CacheStrategy::Permanent
-        );
+        assert_eq!(CacheStrategy::for_launch(3, net, now), CacheStrategy::Permanent);
     }
 
     #[test]
@@ -1372,15 +1347,9 @@ mod tests {
         let net = now - TimeDelta::hours(1);
 
         // Before: Go → ShortTerm
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
         // After failure: status 4 → Permanent
-        assert_eq!(
-            CacheStrategy::for_launch(4, net, now),
-            CacheStrategy::Permanent
-        );
+        assert_eq!(CacheStrategy::for_launch(4, net, now), CacheStrategy::Permanent);
     }
 
     #[test]
@@ -1389,14 +1358,8 @@ mod tests {
         let net = now - TimeDelta::minutes(10);
 
         // Go → ShortTerm
-        assert_eq!(
-            CacheStrategy::for_launch(1, net, now),
-            CacheStrategy::ShortTerm
-        );
+        assert_eq!(CacheStrategy::for_launch(1, net, now), CacheStrategy::ShortTerm);
         // In-flight (status 6) → RealTime
-        assert_eq!(
-            CacheStrategy::for_launch(6, net, now),
-            CacheStrategy::RealTime
-        );
+        assert_eq!(CacheStrategy::for_launch(6, net, now), CacheStrategy::RealTime);
     }
 }

@@ -1,0 +1,93 @@
+# Which countries make up each region in the launch list's region filter.
+#
+# Read by build_region_map.py, which resolves these country codes against LL2's
+# location list to produce the location IDs the app actually queries with. Edit
+# this file and regenerate; never edit the generated table by hand.
+#
+# Countries are ISO 3166-1 alpha-2. Adding one here pulls in every active
+# launch site that country operates, now and in future regenerations.
+#
+# The scheme follows how launch activity is conventionally tabulated — by
+# launching state for the six major programmes, geographically for the rest.
+# A continental split was considered and rejected: Russia's sites straddle
+# Europe and Asia, and a single "Asia" arm would merge China, Japan and India,
+# which is the distinction the filter exists to make.
+#
+# Order here is the order the filter cycles through. The catch-all goes last.
+
+[[region]]
+variant = "US"
+label = "US"
+countries = ["US"]
+
+[[region]]
+variant = "Europe"
+label = "Europe"
+# French Guiana is European here because Kourou is ESA's spaceport.
+#
+# France and Italy are deliberately absent: LL2's only French site is the
+# Hammaguir range in Algeria and its only Italian one is the San Marco platform
+# off Kenya. Both are inactive, and neither is in Europe. Revisit if a mainland
+# European site appears.
+countries = ["GF", "SE", "NO", "GB", "ES"]
+
+[[region]]
+variant = "RussiaKazakhstan"
+label = "Russia/Kaz."
+# Baikonur is in Kazakhstan and Vostochny is in Asia, but all of it is one
+# launch programme. Splitting it geographically would serve nobody.
+countries = ["RU", "KZ"]
+
+[[region]]
+variant = "China"
+label = "China"
+countries = ["CN"]
+
+[[region]]
+variant = "India"
+label = "India"
+countries = ["IN"]
+
+[[region]]
+variant = "Japan"
+label = "Japan"
+countries = ["JP"]
+
+[[region]]
+variant = "Oceania"
+label = "Oceania"
+# New Zealand sits here rather than standing alone: Mahia is the only
+# high-cadence site in the group, and a region holding just it would leave
+# Australia's four ranges with no home of their own.
+countries = ["AU", "NZ", "MH"]
+
+[[region]]
+variant = "MiddleEast"
+label = "Mid. East"
+countries = ["IR", "IL", "OM"]
+
+[[region]]
+variant = "Korea"
+label = "Korea"
+# Both Koreas. Two sites between them, and no reader will confuse Sohae with
+# Naro; separate arms would cost a cycling step each to say the same thing.
+countries = ["KP", "KR"]
+
+[[region]]
+variant = "SouthAmerica"
+label = "S. America"
+countries = ["BR"]
+
+[[region]]
+variant = "Other"
+label = "Other"
+# The complement, not a country list: every active site no region above claims.
+#
+# This is what stops a country we have not thought of from being unreachable.
+# It holds LL2's air- and sea-launch pseudo-sites today, and it will hold the
+# first spaceport in a country nobody added here — on the next regeneration,
+# without a code change. The generator still names its contents in table.rs and
+# on the console, so promoting one to a region of its own stays a decision
+# someone makes rather than one that goes unnoticed.
+catch_all = true
+countries = []

@@ -9,24 +9,93 @@ permissions:
   contents: write
 
 jobs:
+  # Releases are cut only from reviewed code that has landed on main. A tag is
+  # just a pointer to a commit and carries no record of the branch it was made
+  # on, so neither git nor a GitHub tag ruleset can express this — it has to be
+  # checked here, against history.
+  #
+  # Note this gate blocks publishing, not tagging: a bad tag still gets
+  # created and has to be deleted by hand
+  verify-tag-on-main:
+    name: Tag is on main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Fetched explicitly rather than trusting whatever checkout leaves in
+      # refs/remotes.
+      - name: Fetch main
+        run: git fetch --no-tags origin main
+
+      - name: Ensure the tagged commit is an ancestor of main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::${{ github.ref_name }} points at a commit that is not on main."
+            echo "Release only from reviewed, merged code: delete the tag, merge to main, then re-tag."
+            exit 1
+          fi
+
+          behind=$(git rev-list --count "$GITHUB_SHA..origin/main")
+          echo "${{ github.ref_name }} is on main ($behind commit(s) behind the tip)"
+
+  # Checks if the uploaded splash image has changed since the last splash asset
+  # generation. If this fails you may need to re-generate the splash asset using
+  # `/tools/splash/build_splash_asset.py`.
+  splash-asset:
+    name: Splash asset up to date
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned deliberately. Pillow's LANCZOS resampling is the canonical decode
+      # path — the committed asset is whatever this exact version produces, so an
+      # unpinned bump could shift output bytes and fail this gate spuriously.
+      # Bumping it is fine, but regenerate and commit the asset in the same PR.
+      - name: Install Pillow
+        run: python3 -m pip install --quiet pillow==12.3.0
+
+      - name: Check assets/splash.cells matches source artwork
+        run: python3 tools/splash/build_splash_asset.py --check
+
   build:
     name: Build (${{ matrix.target }})
+    needs: [verify-tag-on-main, splash-asset]
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
-            binary: launch-client
+            binary: deltav
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            binary: deltav
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            binary: deltav
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
-            binary: launch-client.exe
+            binary: deltav.exe
             archive: zip
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: actions/cache@v4
         with:
@@ -84,7 +153,9 @@ jobs:
             | Platform | File |
             |----------|------|
             | Linux (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
+            | macOS (Apple Silicon) | `launch-client-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
+            | macOS (Intel) | `launch-client-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz` |
             | Windows (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
 
             ### Usage
-            Download the file for your platform, extract it, and run `launch-client` from your terminal.
+            Download the file for your platform, extract it, and run `deltav` from your terminal.

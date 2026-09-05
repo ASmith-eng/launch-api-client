@@ -11,7 +11,9 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-pub use crate::models::{ActiveFilters, CrewedFilter, DateRangeFilter, RegionFilter, StatusFilter};
+pub use crate::models::{
+    ActiveFilters, CrewedFilter, DateRangeFilter, RegionFilter, RegionSites, StatusFilter,
+};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 use crate::vendor::launch_library_2::region_map;
 
@@ -102,47 +104,21 @@ impl StatusFilter {
 }
 
 impl FilterOption for RegionFilter {
+    /// Order comes from `regions.toml` via the generated table, so the cycling
+    /// order and a region's countries are decided in the same place.
     fn all() -> &'static [Self] {
-        &[
-            Self::All,
-            Self::US,
-            Self::Europe,
-            Self::RussiaKazakhstan,
-            Self::China,
-            Self::India,
-            Self::Japan,
-            Self::NewZealand,
-        ]
+        region_map::all()
     }
 
     fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::US => "US",
-            Self::Europe => "Europe",
-            Self::RussiaKazakhstan => "Russia/Kaz.",
-            Self::China => "China",
-            Self::India => "India",
-            Self::Japan => "Japan",
-            Self::NewZealand => "New Zealand",
-        }
+        region_map::label(self)
     }
 }
 
 impl RegionFilter {
-    /// LL2 `pad__location` query parameter value, if filtering.
-    pub fn pad_location(self) -> Option<String> {
-        let name = match self {
-            Self::All => return None,
-            Self::US => "US",
-            Self::Europe => "Europe",
-            Self::RussiaKazakhstan => "Russia/Kazakhstan",
-            Self::China => "China",
-            Self::India => "India",
-            Self::Japan => "Japan",
-            Self::NewZealand => "New Zealand",
-        };
-        region_map::find_region(name).map(region_map::location_ids_param)
+    /// Resolve to the provider's site IDs for this region.
+    pub fn sites(self) -> RegionSites {
+        region_map::resolve(self)
     }
 }
 
@@ -173,7 +149,12 @@ impl CrewedFilter {
 
 impl FilterOption for DateRangeFilter {
     fn all() -> &'static [Self] {
-        &[Self::All, Self::Next7Days, Self::Next30Days, Self::Next90Days]
+        &[
+            Self::All,
+            Self::Next7Days,
+            Self::Next30Days,
+            Self::Next90Days,
+        ]
     }
 
     fn label(self) -> &'static str {
@@ -269,10 +250,29 @@ impl FilterState {
             || !self.date_range.is_default()
     }
 
+    /// Whether the selected region is one the provider lists no sites for.
+    ///
+    /// There is nothing to ask the API for in that case, so callers should skip
+    /// the request and tell the user rather than fetching an unfiltered list.
+    pub fn region_has_no_sites(&self) -> bool {
+        self.region.sites() == RegionSites::NoneRegistered
+    }
+
     /// Apply this filter state to a [`ListParams`] for API requests.
     pub fn apply_to_params(&self, params: &mut ListParams, now: DateTime<Utc>) {
         params.status_ids = self.status.status_ids();
-        params.pad_location = self.region.pad_location();
+        params.location_ids = match self.region.sites() {
+            RegionSites::Unfiltered => None,
+            RegionSites::Sites(ids) => Some(ids),
+            RegionSites::NoneRegistered => {
+                // Unreachable: callers check region_has_no_sites() first, so a
+                // region with no sites never gets as far as a request. Falling
+                // through to None here would send an unfiltered query and show
+                // every launch under that region.
+                debug_assert!(false, "built params for a region with no sites");
+                None
+            }
+        };
         params.is_crewed = self.is_crewed.is_crewed();
         params.net_lt = self.date_range.net_lt(now);
     }
@@ -342,17 +342,29 @@ mod tests {
         assert_eq!(f, StatusFilter::OnHold);
     }
 
+    /// The region list is generated from `regions.toml`, so this asserts the
+    /// cycling property rather than the labels — restating them here would make
+    /// every editorial change to the region set a test failure.
     #[test]
-    fn region_filter_cycles_all_values() {
+    fn region_filter_cycles_every_region_once() {
+        let regions = RegionFilter::all();
+        assert_eq!(regions[0], RegionFilter::All, "All must lead the cycle");
+
         let mut f = RegionFilter::All;
-        let expected = [
-            "All", "US", "Europe", "Russia/Kaz.", "China", "India", "Japan", "New Zealand",
-        ];
-        for label in &expected {
-            assert_eq!(f.label(), *label);
+        for expected in regions {
+            assert_eq!(f, *expected);
+            assert!(!f.label().is_empty());
             f = f.next();
         }
-        assert_eq!(f, RegionFilter::All);
+        assert_eq!(f, RegionFilter::All, "cycle should wrap");
+    }
+
+    #[test]
+    fn region_labels_are_distinct() {
+        let mut seen = std::collections::HashSet::new();
+        for region in RegionFilter::all() {
+            assert!(seen.insert(region.label()), "duplicate label {:?}", region);
+        }
     }
 
     #[test]
@@ -409,21 +421,29 @@ mod tests {
     }
 
     #[test]
-    fn region_filter_pad_location_all_returns_none() {
-        assert_eq!(RegionFilter::All.pad_location(), None);
+    fn region_filter_all_is_unfiltered() {
+        assert_eq!(RegionFilter::All.sites(), RegionSites::Unfiltered);
     }
 
     #[test]
-    fn region_filter_pad_location_us_returns_ids() {
-        let loc = RegionFilter::US.pad_location().unwrap();
-        assert!(loc.contains("12")); // Kennedy Space Center
-        assert!(loc.contains(','));
+    fn region_filter_resolves_to_sites() {
+        assert!(matches!(RegionFilter::US.sites(), RegionSites::Sites(_)));
     }
 
+    /// Guards the branch that decides whether to skip the request entirely.
     #[test]
-    fn region_filter_pad_location_india_returns_single_id() {
-        let loc = RegionFilter::India.pad_location().unwrap();
-        assert_eq!(loc, "14");
+    fn no_region_currently_reports_missing_sites() {
+        for &region in RegionFilter::all() {
+            let state = FilterState {
+                region,
+                ..Default::default()
+            };
+            assert!(
+                !state.region_has_no_sites(),
+                "{} unexpectedly has no registered sites",
+                region.label()
+            );
+        }
     }
 
     #[test]
@@ -569,7 +589,7 @@ mod tests {
         let now = Utc::now();
         f.apply_to_params(&mut params, now);
         assert!(params.status_ids.is_none());
-        assert!(params.pad_location.is_none());
+        assert!(params.location_ids.is_none());
         assert!(params.is_crewed.is_none());
         assert!(params.net_lt.is_none());
     }
@@ -587,7 +607,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 3, 1, 12, 0, 0).unwrap();
         f.apply_to_params(&mut params, now);
         assert_eq!(params.status_ids, Some("1".into()));
-        assert!(params.pad_location.is_some());
+        assert!(params.location_ids.is_some());
         assert_eq!(params.is_crewed, Some(true));
         assert!(params.net_lt.is_some());
     }

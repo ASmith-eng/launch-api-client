@@ -16,7 +16,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::{rate_limit_title, TitleBar};
+use crate::tui::views::{TitleBar, rate_limit_title};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Width threshold below which we switch from two-column to single-column.
@@ -213,10 +213,8 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
         if let (Some(start), Some(end)) = (&detail.window_start, &detail.window_end) {
             let start_str = start.format("%H:%M").to_string();
             let end_str = end.format("%H:%M").to_string();
-            spans.push(Span::styled(
-                format!("Window: {start_str} - {end_str} UTC"),
-                style::label(),
-            ));
+            spans
+                .push(Span::styled(format!("Window: {start_str} - {end_str} UTC"), style::label()));
         }
 
         if has_window && has_probability {
@@ -225,10 +223,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
 
         if let Some(prob) = detail.probability {
             spans.push(Span::styled("Probability: ", style::label()));
-            spans.push(Span::styled(
-                format!("{prob}"),
-                style::probability_style(Some(prob)),
-            ));
+            spans.push(Span::styled(format!("{prob}"), style::probability_style(Some(prob))));
         }
 
         lines.push(Line::from(spans).centered());
@@ -250,9 +245,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
                         .centered(),
                     );
                 } else {
-                    lines.push(
-                        Line::from(Span::styled(line, style::secondary())).centered(),
-                    );
+                    lines.push(Line::from(Span::styled(line, style::secondary())).centered());
                 }
             }
         }
@@ -276,9 +269,7 @@ fn build_hero_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, wid
                         .centered(),
                     );
                 } else {
-                    lines.push(
-                        Line::from(Span::styled(line, style::warning())).centered(),
-                    );
+                    lines.push(Line::from(Span::styled(line, style::warning())).centered());
                 }
             }
         }
@@ -311,17 +302,11 @@ fn build_updates_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail, 
     for update in detail.updates.iter().take(5) {
         // Timestamp — Tier 3 label, e.g. "Mar 21, 02:31 UTC".
         let timestamp = update.created_on.format("%b %d, %H:%M UTC").to_string();
-        lines.push(Line::from(Span::styled(
-            format!("   {timestamp}"),
-            style::label(),
-        )));
+        lines.push(Line::from(Span::styled(format!("   {timestamp}"), style::label())));
 
         // Comment — Tier 2 secondary, word-wrapped to the available width.
         for wrapped in word_wrap(&update.comment, wrap_width) {
-            lines.push(Line::from(Span::styled(
-                format!("   {wrapped}"),
-                style::secondary(),
-            )));
+            lines.push(Line::from(Span::styled(format!("   {wrapped}"), style::secondary())));
         }
 
         // Blank line between entries.
@@ -553,9 +538,8 @@ fn build_specs_grid(detail: &LaunchDetail, max_width: usize) -> Vec<Line<'static
                     // Pad out to the column boundary only when a right cell follows.
                     if right.get(i).is_some() {
                         let used = label.chars().count() + value.chars().count();
-                        spans.push(Span::raw(
-                            " ".repeat(SPECS_LEFT_COL_WIDTH.saturating_sub(used)),
-                        ));
+                        spans
+                            .push(Span::raw(" ".repeat(SPECS_LEFT_COL_WIDTH.saturating_sub(used))));
                     }
                 }
                 None => spans.push(Span::raw(" ".repeat(SPECS_LEFT_COL_WIDTH))),
@@ -700,10 +684,7 @@ fn build_record_lines(
     out.push(Line::from(Span::styled(stats, style::label())));
 
     if let (Some(count), ConsecutivePlacement::OwnLine) = (consecutive, placement) {
-        out.push(Line::from(Span::styled(
-            format!("{count} consecutive"),
-            style::label(),
-        )));
+        out.push(Line::from(Span::styled(format!("{count} consecutive"), style::label())));
     }
 
     out
@@ -714,10 +695,7 @@ fn build_record_lines(
 /// Success blocks are green, failure blocks are red, percentage is Tier 3.
 pub fn build_record_bar_line(success: u32, total: u32) -> Line<'static> {
     if total == 0 {
-        return Line::from(Span::styled(
-            "░".repeat(RECORD_BAR_WIDTH),
-            style::record_failure(),
-        ));
+        return Line::from(Span::styled("░".repeat(RECORD_BAR_WIDTH), style::record_failure()));
     }
 
     let success_ratio = success as f64 / total as f64;
@@ -731,7 +709,6 @@ pub fn build_record_bar_line(success: u32, total: u32) -> Line<'static> {
         Span::styled(format!(" {pct}%"), style::label()),
     ])
 }
-
 
 // ---------------------------------------------------------------------------
 // Location content
@@ -787,10 +764,7 @@ fn build_mission_section(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) 
             if let Some(orbit) = &mission.orbit {
                 lines.push(Line::from(vec![
                     Span::styled("   Orbit: ", style::label()),
-                    Span::styled(
-                        format!("{} ({})", orbit.name, orbit.abbrev),
-                        style::secondary(),
-                    ),
+                    Span::styled(format!("{} ({})", orbit.name, orbit.abbrev), style::secondary()),
                 ]));
             }
 
@@ -839,14 +813,8 @@ fn build_crew_subsection(lines: &mut Vec<Line<'static>>, detail: &LaunchDetail) 
     for member in &detail.crew {
         lines.push(Line::from(vec![
             Span::raw("   "),
-            Span::styled(
-                format!("{:<w$}", member.name, w = CREW_NAME_WIDTH),
-                style::secondary(),
-            ),
-            Span::styled(
-                format!("{:<w$}", member.role, w = CREW_ROLE_WIDTH),
-                style::label(),
-            ),
+            Span::styled(format!("{:<w$}", member.name, w = CREW_NAME_WIDTH), style::secondary()),
+            Span::styled(format!("{:<w$}", member.role, w = CREW_ROLE_WIDTH), style::label()),
             Span::styled(member.agency.clone(), style::label()),
         ]));
     }
@@ -873,14 +841,8 @@ fn build_landing_subsection(lines: &mut Vec<Line<'static>>, detail: &LaunchDetai
 
         let mut spans = vec![
             Span::raw("   "),
-            Span::styled(
-                format!("{:<w$}", stage, w = LANDING_STAGE_WIDTH),
-                style::secondary(),
-            ),
-            Span::styled(
-                format!("{:<w$}", landing_type, w = LANDING_TYPE_WIDTH),
-                style::label(),
-            ),
+            Span::styled(format!("{:<w$}", stage, w = LANDING_STAGE_WIDTH), style::secondary()),
+            Span::styled(format!("{:<w$}", landing_type, w = LANDING_TYPE_WIDTH), style::label()),
         ];
 
         if let Some(location) = &landing.landing_location {
@@ -953,18 +915,12 @@ fn has_any_links(detail: &LaunchDetail) -> bool {
 fn push_separator(lines: &mut Vec<Line<'static>>, width: u16) {
     let sep_width = (width as usize).saturating_sub(4);
     let sep = "━".repeat(sep_width);
-    lines.push(Line::from(Span::styled(
-        format!("  {sep}"),
-        style::separator(),
-    )));
+    lines.push(Line::from(Span::styled(format!("  {sep}"), style::separator())));
 }
 
 /// Build a section header line (e.g., `"   MISSION"`).
 fn section_header(label: &str) -> Line<'static> {
-    Line::from(Span::styled(
-        format!("   {label}"),
-        style::section_heading(),
-    ))
+    Line::from(Span::styled(format!("   {label}"), style::section_heading()))
 }
 
 /// Prepend a 3-space indent to a line, preserving its spans.
@@ -1014,11 +970,7 @@ fn render_scroll_indicator(
     let vh = area.height as usize;
     let thumb_size = (vh * vh / (vh + max_scroll)).max(1);
     let track_space = vh.saturating_sub(thumb_size);
-    let thumb_pos = if max_scroll > 0 {
-        (scroll_offset * track_space) / max_scroll
-    } else {
-        0
-    };
+    let thumb_pos = (scroll_offset * track_space) / max_scroll;
 
     for i in 0..vh {
         let ch = if i >= thumb_pos && i < thumb_pos + thumb_size {
@@ -1271,7 +1223,9 @@ mod tests {
         use chrono::TimeZone;
         LaunchUpdate {
             comment: comment.into(),
-            created_on: Utc.with_ymd_and_hms(2026, month, day, hour, minute, 0).unwrap(),
+            created_on: Utc
+                .with_ymd_and_hms(2026, month, day, hour, minute, 0)
+                .unwrap(),
             info_url: None,
         }
     }
@@ -1460,12 +1414,7 @@ mod tests {
     fn mission_renders_all_landing_rows_multi_stage() {
         let mut detail = dummy_launch_detail();
         detail.landings = vec![
-            make_landing(
-                Some("Core"),
-                true,
-                Some("ASDS"),
-                Some("Of Course I Still Love You"),
-            ),
+            make_landing(Some("Core"), true, Some("ASDS"), Some("Of Course I Still Love You")),
             make_landing(Some("Side Booster"), true, Some("RTLS"), Some("Landing Zone 1")),
             make_landing(Some("Side Booster"), true, Some("RTLS"), Some("Landing Zone 2")),
         ];
@@ -1597,7 +1546,14 @@ mod tests {
 
         // All six still render, just stacked.
         let text = vehicle_text(&detail, NARROW);
-        for spec in ["Length:", "Diameter:", "Launch mass:", "LEO capacity:", "GTO capacity:", "Thrust:"] {
+        for spec in [
+            "Length:",
+            "Diameter:",
+            "Launch mass:",
+            "LEO capacity:",
+            "GTO capacity:",
+            "Thrust:",
+        ] {
             assert!(text.contains(spec), "{spec} should still render when narrow");
         }
     }
@@ -1694,7 +1650,8 @@ mod tests {
     #[test]
     fn record_lines_omitted_without_full_breakdown() {
         // A total alone would imply a 0% success rate.
-        let lines = build_record_lines(Some(570), None, Some(1), None, ConsecutivePlacement::Inline);
+        let lines =
+            build_record_lines(Some(570), None, Some(1), None, ConsecutivePlacement::Inline);
         assert!(lines.is_empty());
     }
 
@@ -1715,10 +1672,7 @@ mod tests {
             ConsecutivePlacement::Inline,
         );
         assert_eq!(lines.len(), 2, "bar + stats line only");
-        assert_eq!(
-            line_text(&lines[1]),
-            "570 launches (569 ok, 1 fail) · 272 consecutive"
-        );
+        assert_eq!(line_text(&lines[1]), "570 launches (569 ok, 1 fail) · 272 consecutive");
     }
 
     #[test]
@@ -1903,7 +1857,6 @@ mod tests {
         assert_eq!(format_thousands(1_000_000), "1,000,000");
     }
 
-
     // ── Probability colouring ─────────────────────────────────────────
 
     #[test]
@@ -1911,10 +1864,15 @@ mod tests {
         let mut detail = rich_detail();
         detail.probability = Probability::new(90);
         let lines = build_content_lines(&detail, 120);
-        let prob_line = lines.iter().find(|l| {
-            l.spans.iter().any(|s| s.content.contains("90%"))
-        }).expect("should contain probability");
-        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("90%")).unwrap();
+        let prob_line = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("90%")))
+            .expect("should contain probability");
+        let pct_span = prob_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("90%"))
+            .unwrap();
         assert_eq!(pct_span.style.fg, Some(Color::Green));
     }
 
@@ -1923,10 +1881,15 @@ mod tests {
         let mut detail = rich_detail();
         detail.probability = Probability::new(60);
         let lines = build_content_lines(&detail, 120);
-        let prob_line = lines.iter().find(|l| {
-            l.spans.iter().any(|s| s.content.contains("60%"))
-        }).expect("should contain probability");
-        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("60%")).unwrap();
+        let prob_line = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("60%")))
+            .expect("should contain probability");
+        let pct_span = prob_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("60%"))
+            .unwrap();
         assert_eq!(pct_span.style.fg, Some(Color::Yellow));
     }
 
@@ -1935,10 +1898,15 @@ mod tests {
         let mut detail = rich_detail();
         detail.probability = Probability::new(30);
         let lines = build_content_lines(&detail, 120);
-        let prob_line = lines.iter().find(|l| {
-            l.spans.iter().any(|s| s.content.contains("30%"))
-        }).expect("should contain probability");
-        let pct_span = prob_line.spans.iter().find(|s| s.content.contains("30%")).unwrap();
+        let prob_line = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("30%")))
+            .expect("should contain probability");
+        let pct_span = prob_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("30%"))
+            .unwrap();
         assert_eq!(pct_span.style.fg, Some(Color::Red));
     }
 
@@ -1984,10 +1952,7 @@ mod tests {
             .collect();
 
         assert!(text.contains("██"), "should have status badges");
-        assert!(
-            text.contains("Go for Launch") || text.contains("Go"),
-            "should have status name"
-        );
+        assert!(text.contains("Go for Launch") || text.contains("Go"), "should have status name");
     }
 
     #[test]
@@ -2062,11 +2027,7 @@ mod tests {
 
         let separator_count = lines
             .iter()
-            .filter(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.contains('━'))
-            })
+            .filter(|l| l.spans.iter().any(|s| s.content.contains('━')))
             .count();
 
         assert!(separator_count >= 3, "expected at least 3 separators");
@@ -2226,10 +2187,7 @@ mod tests {
             provider_row.is_some() && location_row.is_some(),
             "both headings should appear on their own lines when stacked"
         );
-        assert!(
-            provider_row < location_row,
-            "provider should stack above location"
-        );
+        assert!(provider_row < location_row, "provider should stack above location");
         assert!(
             !lines.iter().any(|l| line_text(l).contains('│')),
             "stacked layout should have no column divider"
@@ -2247,7 +2205,12 @@ mod tests {
             make_crew("Anne McClain", "Commander", "NASA"),
             make_crew("Nichole Ayers", "Pilot", "NASA"),
         ];
-        detail.landings = vec![make_landing(Some("Core"), true, Some("ASDS"), Some("OCISLY"))];
+        detail.landings = vec![make_landing(
+            Some("Core"),
+            true,
+            Some("ASDS"),
+            Some("OCISLY"),
+        )];
         detail.rocket_maiden_flight = Some("2010-06-04".into());
         detail.rocket_length = Some(70.0);
         detail.rocket_thrust = Some(7_607.0);
@@ -2356,10 +2319,10 @@ mod tests {
 
     // --- TestBackend rendering tests ---
 
-    use ratatui::backend::TestBackend;
-    use ratatui::Terminal;
-    use crate::tui::app::App;
     use crate::models::LaunchDetailCache;
+    use crate::tui::app::App;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
         let buf = terminal.backend().buffer();
@@ -2410,10 +2373,7 @@ mod tests {
             text.contains("No detail data available"),
             "missing detail should show not-available message, got:\n{text}"
         );
-        assert!(
-            text.contains("Esc"),
-            "missing detail should hint about Esc key, got:\n{text}"
-        );
+        assert!(text.contains("Esc"), "missing detail should hint about Esc key, got:\n{text}");
     }
 
     #[test]
@@ -2421,8 +2381,7 @@ mod tests {
         // 10KB+ mission description — edge case from design doc.
         let mut detail = rich_detail();
         // 10KB+ description with spaces so word-wrap actually wraps.
-        let large_desc = "The quick brown fox jumps over the lazy dog. "
-            .repeat(250); // ~11KB
+        let large_desc = "The quick brown fox jumps over the lazy dog. ".repeat(250); // ~11KB
         detail.mission = Some(MissionSummary {
             name: "Big Mission".into(),
             mission_type: "Test".into(),
@@ -2531,10 +2490,7 @@ mod tests {
             text.contains("Starship IFT-7"),
             "detail with cached data should show launch name, got:\n{text}"
         );
-        assert!(
-            text.contains("SpaceX"),
-            "detail should show provider, got:\n{text}"
-        );
+        assert!(text.contains("SpaceX"), "detail should show provider, got:\n{text}");
     }
 
     #[test]

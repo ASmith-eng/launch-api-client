@@ -85,9 +85,7 @@ pub fn format_countdown(now: DateTime<Utc>, target: DateTime<Utc>) -> String {
     let seconds = abs_secs % 60;
 
     if days > 0 {
-        format!(
-            "{prefix}{days:02} days, {hours:02}:{minutes:02}:{seconds:02}"
-        )
+        format!("{prefix}{days:02} days, {hours:02}:{minutes:02}:{seconds:02}")
     } else {
         format!("{prefix}{hours:02}:{minutes:02}:{seconds:02}")
     }
@@ -113,9 +111,7 @@ pub fn countdown_style(now: DateTime<Utc>, target: DateTime<Utc>) -> Style {
             .add_modifier(Modifier::BOLD)
     } else if total_secs < 3_600 {
         // < 1 hour.
-        Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
     } else if total_secs < 86_400 {
         // < 24 hours.
         Style::default()
@@ -204,28 +200,19 @@ mod tests {
     #[test]
     fn net_time_month_precision() {
         let net: DateTime<Utc> = "2026-09-15T00:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_net_time(&net, Some(&net_precision("Month")), &None),
-            "Sep 2026"
-        );
+        assert_eq!(format_net_time(&net, Some(&net_precision("Month")), &None), "Sep 2026");
     }
 
     #[test]
     fn net_time_year_precision() {
         let net: DateTime<Utc> = "2027-01-01T00:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_net_time(&net, Some(&net_precision("Year")), &None),
-            "2027"
-        );
+        assert_eq!(format_net_time(&net, Some(&net_precision("Year")), &None), "2027");
     }
 
     #[test]
     fn net_time_day_precision() {
         let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_net_time(&net, Some(&net_precision("Day")), &None),
-            "Feb 28, 2026"
-        );
+        assert_eq!(format_net_time(&net, Some(&net_precision("Day")), &None), "Feb 28, 2026");
     }
 
     #[test]
@@ -249,20 +236,14 @@ mod tests {
     #[test]
     fn net_time_no_precision_fallback_utc() {
         let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_net_time(&net, None, &None),
-            "Feb 28 09:00 UTC"
-        );
+        assert_eq!(format_net_time(&net, None, &None), "Feb 28 09:00 UTC");
     }
 
     #[test]
     fn net_time_invalid_timezone_falls_back_to_utc() {
         let net: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
         let tz = Some("Not/A/Timezone".to_string());
-        assert_eq!(
-            format_net_time(&net, None, &tz),
-            "Feb 28 09:00 UTC"
-        );
+        assert_eq!(format_net_time(&net, None, &tz), "Feb 28 09:00 UTC");
     }
 
     #[test]
@@ -321,10 +302,7 @@ mod tests {
     fn countdown_future_with_days() {
         let now: DateTime<Utc> = "2026-02-27T12:00:00Z".parse().unwrap();
         let target: DateTime<Utc> = "2026-03-01T02:23:45Z".parse().unwrap();
-        assert_eq!(
-            format_countdown(now, target),
-            "T-01 days, 14:23:45"
-        );
+        assert_eq!(format_countdown(now, target), "T-01 days, 14:23:45");
     }
 
     #[test]
@@ -345,10 +323,7 @@ mod tests {
     fn countdown_past_with_days() {
         let now: DateTime<Utc> = "2026-03-02T10:00:00Z".parse().unwrap();
         let target: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_countdown(now, target),
-            "T+02 days, 01:00:00"
-        );
+        assert_eq!(format_countdown(now, target), "T+02 days, 01:00:00");
     }
 
     #[test]
@@ -361,10 +336,7 @@ mod tests {
     fn countdown_exactly_one_day() {
         let now: DateTime<Utc> = "2026-02-27T09:00:00Z".parse().unwrap();
         let target: DateTime<Utc> = "2026-02-28T09:00:00Z".parse().unwrap();
-        assert_eq!(
-            format_countdown(now, target),
-            "T-01 days, 00:00:00"
-        );
+        assert_eq!(format_countdown(now, target), "T-01 days, 00:00:00");
     }
 
     #[test]
