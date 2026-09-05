@@ -34,7 +34,8 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     }
 
     if app.launches.is_empty() {
-        let empty = Paragraph::new("  No launches to display.").style(style::label());
+        let empty = Paragraph::new(empty_list_message(app.filter_state.region_has_no_sites()))
+            .style(style::label());
         frame.render_widget(empty, inner);
         return;
     }
@@ -49,6 +50,18 @@ pub fn render_list(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     render_hint_bar(frame, hint_area, app);
 }
 
+/// Text shown in place of the list when there is nothing to show.
+///
+/// An empty region is attributed to the provider rather than reported as a
+/// failure — no request was made, and retrying cannot change the answer.
+fn empty_list_message(region_has_no_sites: bool) -> &'static str {
+    if region_has_no_sites {
+        "  This region has no launch sites registered with the data provider."
+    } else {
+        "  No launches to display."
+    }
+}
+
 /// Build the outer block with three independently aligned title segments:
 /// - Left: " Launches [Filtered]"
 /// - Center: "Showing N of M — Page X of Y"
@@ -60,7 +73,10 @@ fn build_title_block(app: &App) -> ratatui::widgets::Block<'static> {
     } else {
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" Launches")];
         if app.filter_state.has_active_filters() {
-            spans.push(Span::styled(" [Filtered]", Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(
+                " [Filtered]",
+                Style::default().fg(Color::Cyan),
+            ));
         }
         spans.push(Span::raw(" "));
         Line::from(spans)
@@ -228,10 +244,7 @@ fn render_hint_bar(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     ];
 
     if app.total_pages() > 1 {
-        left_spans.extend([
-            Span::styled("n/p", key),
-            Span::styled(": Page · ", desc),
-        ]);
+        left_spans.extend([Span::styled("n/p", key), Span::styled(": Page · ", desc)]);
     }
 
     left_spans.extend([
@@ -377,12 +390,10 @@ mod tests {
 
     // --- TestBackend rendering tests ---
 
+    use crate::models::{LaunchStatus, LocationInfo, NetPrecision, PadInfo, Provider};
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use ratatui::Terminal;
-    use crate::models::{
-        LaunchStatus, LocationInfo, PadInfo, Provider, NetPrecision,
-    };
 
     fn make_test_terminal(width: u16, height: u16) -> Terminal<TestBackend> {
         let backend = TestBackend::new(width, height);
@@ -452,6 +463,18 @@ mod tests {
             text.contains("No launches to display"),
             "empty list should show 'No launches' message, got:\n{text}"
         );
+    }
+
+    #[test]
+    fn empty_message_attributes_a_siteless_region_to_the_provider() {
+        let msg = empty_list_message(true);
+        assert!(msg.contains("no launch sites"), "got: {msg}");
+        assert!(msg.contains("data provider"), "got: {msg}");
+    }
+
+    #[test]
+    fn empty_message_defaults_to_no_launches() {
+        assert!(empty_list_message(false).contains("No launches to display"));
     }
 
     #[test]

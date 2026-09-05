@@ -67,7 +67,10 @@ pub enum FetchResult {
 /// Returns `Some(ThrottleSync)` when the rate limiter's `should_sync()`
 /// triggers (remaining <= 2, never synced, or >1 hour since last sync).
 /// Only fires when no fetch is in progress and the app isn't in an error state.
-pub async fn check_needs_throttle_sync<C: Clock>(app: &App, client: &Ll2Client<C>) -> Option<FetchKind> {
+pub async fn check_needs_throttle_sync<C: Clock>(
+    app: &App,
+    client: &Ll2Client<C>,
+) -> Option<FetchKind> {
     if app.loading || app.error_state.is_some() {
         return None;
     }
@@ -85,6 +88,14 @@ pub async fn check_needs_throttle_sync<C: Clock>(app: &App, client: &Ll2Client<C
 /// or a fetch is already in-flight, or an error is being displayed).
 pub fn check_needs_fetch(app: &App) -> Option<FetchKind> {
     if app.loading || app.error_state.is_some() {
+        return None;
+    }
+
+    // A region LL2 has no sites for cannot be expressed as a query — asking
+    // anyway would return every launch, which reads as the filter being
+    // ignored. The list view says so instead. Blocks refresh too: retrying
+    // cannot change the answer.
+    if list_screen(&app.screen) && app.filter_state.region_has_no_sites() {
         return None;
     }
 
@@ -162,6 +173,14 @@ fn check_refresh(app: &App) -> Option<FetchKind> {
         }
         _ => None,
     }
+}
+
+/// Whether the active screen is the (filterable) launch list.
+fn list_screen(screen: &AppScreen) -> bool {
+    matches!(
+        active_screen(screen),
+        AppScreen::List | AppScreen::Splash { .. }
+    )
 }
 
 /// Resolve the "real" screen when a help overlay is active.
@@ -284,7 +303,8 @@ pub async fn handle_fetch_result<C: Clock>(
             app.total_count = total_count;
 
             // Populate the in-memory page cache so back-navigation is instant.
-            app.page_cache.insert(app.current_page, app.launches.clone());
+            app.page_cache
+                .insert(app.current_page, app.launches.clone());
 
             // Reset selection if it's now out of bounds.
             if app.selected_index >= app.launches.len() && !app.launches.is_empty() {
@@ -356,9 +376,7 @@ pub async fn handle_fetch_result<C: Clock>(
                     AppError::Network(e) if e.is_decode() => {
                         "Unexpected response from server".to_string()
                     }
-                    AppError::ApiParse(_) => {
-                        "Unexpected response from server".to_string()
-                    }
+                    AppError::ApiParse(_) => "Unexpected response from server".to_string(),
                     AppError::ApiError { status, .. } => {
                         format!("Server returned an error ({status})")
                     }
@@ -480,7 +498,8 @@ mod tests {
                 launches: launches.clone(),
                 total_count: 42,
             },
-        ).await;
+        )
+        .await;
 
         assert_eq!(app.launches.len(), 2);
         assert_eq!(app.total_count, 42);
@@ -511,7 +530,8 @@ mod tests {
                 launches,
                 total_count: 1,
             },
-        ).await;
+        )
+        .await;
 
         let loaded = cm.load_launch_list().await.unwrap();
         assert!(loaded.is_some());
@@ -537,7 +557,8 @@ mod tests {
                 launches: vec![sample_launch("id-1", "Launch 1")],
                 total_count: 1,
             },
-        ).await;
+        )
+        .await;
 
         assert_eq!(app.selected_index, 0);
     }
@@ -563,7 +584,8 @@ mod tests {
                 launch_id: launch_id.clone(),
                 detail: Box::new(detail),
             },
-        ).await;
+        )
+        .await;
 
         assert!(app.detail_cache.contains_key(&launch_id));
         let cached = &app.detail_cache[&launch_id];
@@ -589,7 +611,8 @@ mod tests {
                 launch_id: launch_id.clone(),
                 detail: Box::new(detail),
             },
-        ).await;
+        )
+        .await;
 
         let loaded = cm.load_launch_detail(&launch_id).await.unwrap();
         assert!(loaded.is_some());
@@ -613,7 +636,8 @@ mod tests {
                 launch_id: "some-id".into(),
                 detail: Box::new(dummy_launch_detail()),
             },
-        ).await;
+        )
+        .await;
 
         assert!(!app.is_offline());
         assert!(app.error_state.is_none());
@@ -638,7 +662,8 @@ mod tests {
                 status: 500,
                 message: "Server Error".into(),
             }),
-        ).await;
+        )
+        .await;
 
         assert!(!app.loading);
         match &app.error_state {
@@ -664,7 +689,8 @@ mod tests {
             &cm,
             &config,
             FetchResult::Error(AppError::RateLimited(available_at)),
-        ).await;
+        )
+        .await;
 
         match &app.error_state {
             Some(ErrorState::RateLimited {
@@ -693,7 +719,8 @@ mod tests {
                 launches: vec![],
                 total_count: 0,
             },
-        ).await;
+        )
+        .await;
 
         assert!(!app.is_offline());
         assert!(app.error_state.is_none());
