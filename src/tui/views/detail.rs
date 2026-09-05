@@ -970,11 +970,7 @@ fn render_scroll_indicator(
     let vh = area.height as usize;
     let thumb_size = (vh * vh / (vh + max_scroll)).max(1);
     let track_space = vh.saturating_sub(thumb_size);
-    let thumb_pos = if max_scroll > 0 {
-        (scroll_offset * track_space) / max_scroll
-    } else {
-        0
-    };
+    let thumb_pos = (scroll_offset * track_space) / max_scroll;
 
     for i in 0..vh {
         let ch = if i >= thumb_pos && i < thumb_pos + thumb_size {
