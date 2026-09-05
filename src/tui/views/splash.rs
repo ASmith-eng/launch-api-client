@@ -10,10 +10,10 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::Frame;
 
 use crate::tui::views::TitleBar;
 
@@ -121,11 +121,8 @@ fn asset() -> &'static Asset {
 
         for (index, cell) in cells.iter_mut().enumerate() {
             let bytes = &ASSET[index * BYTES_PER_CELL..][..BYTES_PER_CELL];
-            let (mask, fg, bg) = (
-                bytes[0],
-                (bytes[1], bytes[2], bytes[3]),
-                (bytes[4], bytes[5], bytes[6]),
-            );
+            let (mask, fg, bg) =
+                (bytes[0], (bytes[1], bytes[2], bytes[3]), (bytes[4], bytes[5], bytes[6]));
             *cell = PhotoCell { mask, fg, bg };
 
             let lit = mask.count_ones();
@@ -228,11 +225,7 @@ fn lerp(start: f64, end: f64, factor: f64) -> f64 {
 /// Brightness of the closing wordmark over the phase spanning
 /// `phase_start..phase_end`.
 fn wordmark_ramp(secs: f64, phase_start: f64, phase_end: f64) -> f64 {
-    lerp(
-        0.0,
-        1.0,
-        (secs - phase_start) / WORDMARK_RAMP_SECS.min(phase_end - phase_start),
-    )
+    lerp(0.0, 1.0, (secs - phase_start) / WORDMARK_RAMP_SECS.min(phase_end - phase_start))
 }
 
 fn dim(rgb: Rgb, factor: f64) -> Rgb {
@@ -359,25 +352,13 @@ pub fn frame_at(elapsed: Duration, tier: ColourTier) -> SplashFrame {
         (
             0.0,
             0.0,
-            lerp(
-                0.0,
-                1.0,
-                (secs - MONO_FIELD_ENDS) / (MONO_SETTLE_ENDS - MONO_FIELD_ENDS),
-            ),
+            lerp(0.0, 1.0, (secs - MONO_FIELD_ENDS) / (MONO_SETTLE_ENDS - MONO_FIELD_ENDS)),
             wordmark_ramp(secs, MONO_SETTLE_ENDS, MONO_SEQUENCE_ENDS),
         )
     } else {
         (
-            lerp(
-                0.0,
-                1.0,
-                (secs - STATIC_ENDS) / (GHOST_ENDS - STATIC_ENDS),
-            ),
-            lerp(
-                0.0,
-                1.0,
-                (secs - GHOST_ENDS) / (RESOLVE_ENDS - GHOST_ENDS),
-            ),
+            lerp(0.0, 1.0, (secs - STATIC_ENDS) / (GHOST_ENDS - STATIC_ENDS)),
+            lerp(0.0, 1.0, (secs - GHOST_ENDS) / (RESOLVE_ENDS - GHOST_ENDS)),
             lerp(0.0, 1.0, (secs - HOLD_ENDS) / (SETTLE_ENDS - HOLD_ENDS)),
             wordmark_ramp(secs, SETTLE_ENDS, SEQUENCE_ENDS),
         )
@@ -573,8 +554,8 @@ pub fn render_splash(frame: &mut Frame, area: Rect, elapsed: Duration, tier: Col
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn at(secs: f64) -> Duration {
         Duration::from_secs_f64(secs)
@@ -734,18 +715,9 @@ mod tests {
         use ColourTier::{Greyscale, Mono, Truecolor};
         assert_eq!(ColourTier::from_env(Some("truecolor"), None), Truecolor);
         assert_eq!(ColourTier::from_env(Some("24bit"), None), Truecolor);
-        assert_eq!(
-            ColourTier::from_env(Some("truecolor"), Some("xterm")),
-            Truecolor
-        );
-        assert_eq!(
-            ColourTier::from_env(None, Some("xterm-256color")),
-            Greyscale
-        );
-        assert_eq!(
-            ColourTier::from_env(Some("8bit"), Some("screen-256color")),
-            Greyscale
-        );
+        assert_eq!(ColourTier::from_env(Some("truecolor"), Some("xterm")), Truecolor);
+        assert_eq!(ColourTier::from_env(None, Some("xterm-256color")), Greyscale);
+        assert_eq!(ColourTier::from_env(Some("8bit"), Some("screen-256color")), Greyscale);
         assert_eq!(ColourTier::from_env(None, Some("xterm")), Mono);
         assert_eq!(ColourTier::from_env(None, None), Mono);
     }
@@ -762,14 +734,8 @@ mod tests {
     #[test]
     fn mono_tier_runs_the_shorter_sequence() {
         assert_eq!(ColourTier::Mono.duration(), Duration::from_secs_f64(1.6));
-        assert_eq!(
-            ColourTier::Truecolor.duration(),
-            Duration::from_secs_f64(4.2)
-        );
-        assert_eq!(
-            ColourTier::Greyscale.duration(),
-            ColourTier::Truecolor.duration()
-        );
+        assert_eq!(ColourTier::Truecolor.duration(), Duration::from_secs_f64(4.2));
+        assert_eq!(ColourTier::Greyscale.duration(), ColourTier::Truecolor.duration());
     }
 
     #[test]
@@ -892,10 +858,7 @@ mod tests {
             for col in 0..PANEL_COLS {
                 let symbol = buf[(origin_col + col, origin_row + row)].symbol();
                 let ch = symbol.chars().next().unwrap();
-                assert!(
-                    WORD.contains(&ch),
-                    "unexpected glyph {symbol:?} in letter field"
-                );
+                assert!(WORD.contains(&ch), "unexpected glyph {symbol:?} in letter field");
             }
         }
     }
@@ -911,10 +874,7 @@ mod tests {
     #[test]
     fn skip_hint_rides_the_bottom_border_while_visible() {
         let text = hint_row_text(&render_to_buffer(1.1, ColourTier::Truecolor));
-        assert!(
-            text.contains("PRESS ANY KEY TO SKIP"),
-            "hint row was {text:?}"
-        );
+        assert!(text.contains("PRESS ANY KEY TO SKIP"), "hint row was {text:?}");
     }
 
     #[test]
@@ -985,9 +945,6 @@ mod tests {
     fn the_short_sequence_holds_its_wordmark_too() {
         let held = MONO_SETTLE_ENDS + WORDMARK_RAMP_SECS + 0.01;
         assert_eq!(wordmark_brightness(held, ColourTier::Mono), WHITE);
-        assert_eq!(
-            wordmark_brightness(MONO_SEQUENCE_ENDS, ColourTier::Mono),
-            WHITE
-        );
+        assert_eq!(wordmark_brightness(MONO_SEQUENCE_ENDS, ColourTier::Mono), WHITE);
     }
 }

@@ -14,7 +14,7 @@ use crate::tui::app::App;
 use crate::tui::style;
 use crate::tui::time_fmt;
 use crate::tui::views::status_bar;
-use crate::tui::views::{rate_limit_title, TitleBar};
+use crate::tui::views::{TitleBar, rate_limit_title};
 use crate::vendor::launch_library_2::status_map::{status_style, unknown_status_style};
 
 /// Height of a single launch item in lines (name + provider + blank separator).
@@ -73,10 +73,7 @@ fn build_title_block(app: &App) -> ratatui::widgets::Block<'static> {
     } else {
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" Launches")];
         if app.filter_state.has_active_filters() {
-            spans.push(Span::styled(
-                " [Filtered]",
-                Style::default().fg(Color::Cyan),
-            ));
+            spans.push(Span::styled(" [Filtered]", Style::default().fg(Color::Cyan)));
         }
         spans.push(Span::raw(" "));
         Line::from(spans)
@@ -391,9 +388,9 @@ mod tests {
     // --- TestBackend rendering tests ---
 
     use crate::models::{LaunchStatus, LocationInfo, NetPrecision, PadInfo, Provider};
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use ratatui::Terminal;
 
     fn make_test_terminal(width: u16, height: u16) -> Terminal<TestBackend> {
         let backend = TestBackend::new(width, height);
@@ -510,18 +507,9 @@ mod tests {
             .unwrap();
 
         let text = buffer_text(&terminal);
-        assert!(
-            text.contains("[Go]"),
-            "list should render status badge [Go], got:\n{text}"
-        );
-        assert!(
-            text.contains("Falcon 9"),
-            "list should render launch name, got:\n{text}"
-        );
-        assert!(
-            text.contains("SpaceX"),
-            "list should render provider name, got:\n{text}"
-        );
+        assert!(text.contains("[Go]"), "list should render status badge [Go], got:\n{text}");
+        assert!(text.contains("Falcon 9"), "list should render launch name, got:\n{text}");
+        assert!(text.contains("SpaceX"), "list should render provider name, got:\n{text}");
     }
 
     #[test]
@@ -538,10 +526,7 @@ mod tests {
             .unwrap();
 
         let text = buffer_text(&terminal);
-        assert!(
-            text.contains("[TBD]"),
-            "list should render status badge [TBD], got:\n{text}"
-        );
+        assert!(text.contains("[TBD]"), "list should render status badge [TBD], got:\n{text}");
     }
 
     #[test]

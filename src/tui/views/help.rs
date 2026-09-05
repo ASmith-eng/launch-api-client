@@ -62,7 +62,12 @@ fn build_help_lines(context: HelpContext) -> Vec<Line<'static>> {
     match context {
         HelpContext::List => {
             lines.push(Line::from(Span::styled("  Navigation", heading)));
-            lines.push(key_line("  \u{2191}/\u{2193}       ", "Navigate launch list", key_style, dim));
+            lines.push(key_line(
+                "  \u{2191}/\u{2193}       ",
+                "Navigate launch list",
+                key_style,
+                dim,
+            ));
             lines.push(key_line("  Enter     ", "View launch details", key_style, dim));
             lines.push(key_line("  Home/End  ", "Jump to first/last", key_style, dim));
             lines.push(key_line("  n/p       ", "Next/previous page", key_style, dim));
@@ -77,15 +82,9 @@ fn build_help_lines(context: HelpContext) -> Vec<Line<'static>> {
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
                 Span::styled("  Tip: ", tip_style),
-                Span::styled(
-                    "Create config.toml in your",
-                    tip_style,
-                ),
+                Span::styled("Create config.toml in your", tip_style),
             ]));
-            lines.push(Line::from(Span::styled(
-                "  config directory to customize.",
-                tip_style,
-            )));
+            lines.push(Line::from(Span::styled("  config directory to customize.", tip_style)));
         }
         HelpContext::Detail => {
             lines.push(Line::from(Span::styled("  Navigation", heading)));
@@ -114,11 +113,13 @@ fn build_help_lines(context: HelpContext) -> Vec<Line<'static>> {
 }
 
 /// Build a single key-binding line: key in white, description in dim.
-fn key_line(key: &'static str, desc: &'static str, key_style: Style, desc_style: Style) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(key, key_style),
-        Span::styled(desc, desc_style),
-    ])
+fn key_line(
+    key: &'static str,
+    desc: &'static str,
+    key_style: Style,
+    desc_style: Style,
+) -> Line<'static> {
+    Line::from(vec![Span::styled(key, key_style), Span::styled(desc, desc_style)])
 }
 
 /// Create a centered rectangle of the given size within `area`.
@@ -152,10 +153,7 @@ mod tests {
 
     #[test]
     fn help_context_from_filter_panel_is_list() {
-        assert_eq!(
-            HelpContext::from_screen(&AppScreen::FilterPanel),
-            HelpContext::List,
-        );
+        assert_eq!(HelpContext::from_screen(&AppScreen::FilterPanel), HelpContext::List,);
     }
 
     #[test]
@@ -167,7 +165,11 @@ mod tests {
     #[test]
     fn list_help_contains_navigation_keys() {
         let lines = build_help_lines(HelpContext::List);
-        let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect();
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(text.contains("Navigate launch list"));
         assert!(text.contains("Enter"));
         assert!(text.contains("Home/End"));
@@ -177,14 +179,22 @@ mod tests {
     #[test]
     fn list_help_contains_tip() {
         let lines = build_help_lines(HelpContext::List);
-        let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect();
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(text.contains("config.toml"));
     }
 
     #[test]
     fn detail_help_contains_scroll_keys() {
         let lines = build_help_lines(HelpContext::Detail);
-        let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect();
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(text.contains("Scroll content"));
         assert!(text.contains("Back to list"));
     }
@@ -192,7 +202,11 @@ mod tests {
     #[test]
     fn detail_help_does_not_contain_filter() {
         let lines = build_help_lines(HelpContext::Detail);
-        let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect();
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(!text.contains("filter"));
     }
 
@@ -210,7 +224,11 @@ mod tests {
     fn both_contexts_contain_quit_and_help_toggle() {
         for ctx in [HelpContext::List, HelpContext::Detail] {
             let lines = build_help_lines(ctx);
-            let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.as_ref()).collect();
+            let text: String = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.as_ref())
+                .collect();
             assert!(text.contains("Quit application"), "context {ctx:?} missing quit");
             assert!(text.contains("Toggle this help"), "context {ctx:?} missing help toggle");
         }

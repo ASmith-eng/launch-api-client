@@ -78,10 +78,7 @@ impl TitleBar {
 }
 
 /// Build a right-aligned rate limit title segment, if data is available.
-pub fn rate_limit_title(
-    remaining: Option<u32>,
-    total: Option<u32>,
-) -> Option<Line<'static>> {
+pub fn rate_limit_title(remaining: Option<u32>, total: Option<u32>) -> Option<Line<'static>> {
     match (remaining, total) {
         (Some(r), Some(t)) => Some(Line::from(Span::raw(format!(" {r}/{t} reqs ")))),
         _ => None,

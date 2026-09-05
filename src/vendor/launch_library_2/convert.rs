@@ -185,7 +185,13 @@ impl From<Ll2LaunchDetail> for LaunchDetail {
         let crew = spacecraft_stages
             .into_iter()
             .next()
-            .map(|stage| stage.launch_crew.into_iter().map(CrewMember::from).collect())
+            .map(|stage| {
+                stage
+                    .launch_crew
+                    .into_iter()
+                    .map(CrewMember::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
         let landings = launcher_stages
@@ -386,15 +392,9 @@ mod tests {
         assert_eq!(summary.status.id, 1);
         assert_eq!(summary.status.abbrev, "Go");
         assert_eq!(summary.launch_service_provider.name, "SpaceX");
-        assert_eq!(
-            summary.launch_service_provider.provider_type.as_deref(),
-            Some("Commercial")
-        );
+        assert_eq!(summary.launch_service_provider.provider_type.as_deref(), Some("Commercial"));
         assert_eq!(summary.pad.location.name, "Starbase, Texas");
-        assert_eq!(
-            summary.pad.location.timezone_name.as_deref(),
-            Some("America/Chicago")
-        );
+        assert_eq!(summary.pad.location.timezone_name.as_deref(), Some("America/Chicago"));
 
         let mission = summary.mission.unwrap();
         assert_eq!(mission.name, "Starship IFT-7");
@@ -559,17 +559,11 @@ mod tests {
         assert_eq!(detail.status.id, 1);
         assert_eq!(detail.probability, Probability::new(90));
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
-        assert_eq!(
-            detail.image_url.as_deref(),
-            Some("https://example.com/starship.jpg")
-        );
+        assert_eq!(detail.image_url.as_deref(), Some("https://example.com/starship.jpg"));
         assert_eq!(detail.provider_total_launches, Some(301));
         assert_eq!(detail.provider_successful_launches, Some(295));
         assert_eq!(detail.provider_failed_launches, Some(6));
-        assert_eq!(
-            detail.rocket_full_name.as_deref(),
-            Some("Starship (Super Heavy + Starship)")
-        );
+        assert_eq!(detail.rocket_full_name.as_deref(), Some("Starship (Super Heavy + Starship)"));
         assert_eq!(detail.vid_urls.len(), 1);
         assert_eq!(detail.vid_urls[0].url, "https://youtube.com/watch?v=abc");
         assert_eq!(detail.info_urls.len(), 1);
@@ -746,10 +740,7 @@ mod tests {
         assert!(landing.landing_attempt);
         assert_eq!(landing.landing_success, Some(true));
         assert_eq!(landing.landing_type.as_deref(), Some("ASDS"));
-        assert_eq!(
-            landing.landing_location.as_deref(),
-            Some("Of Course I Still Love You")
-        );
+        assert_eq!(landing.landing_location.as_deref(), Some("Of Course I Still Love You"));
 
         // Vehicle specs.
         assert_eq!(detail.rocket_variant.as_deref(), Some("Block 5"));

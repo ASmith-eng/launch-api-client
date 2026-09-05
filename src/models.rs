@@ -548,19 +548,10 @@ pub(crate) mod tests {
         let serialized = serde_json::to_string(&cache).unwrap();
         let deserialized: LaunchListCache = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.page_offset, 25);
-        assert_eq!(
-            deserialized.active_filters.status,
-            StatusFilter::GoForLaunch
-        );
+        assert_eq!(deserialized.active_filters.status, StatusFilter::GoForLaunch);
         assert_eq!(deserialized.active_filters.region, RegionFilter::US);
-        assert_eq!(
-            deserialized.active_filters.is_crewed,
-            CrewedFilter::CrewedOnly
-        );
-        assert_eq!(
-            deserialized.active_filters.date_range,
-            DateRangeFilter::Next30Days
-        );
+        assert_eq!(deserialized.active_filters.is_crewed, CrewedFilter::CrewedOnly);
+        assert_eq!(deserialized.active_filters.date_range, DateRangeFilter::Next30Days);
     }
 
     /// Round-trip test for `details/{uuid}.json`.

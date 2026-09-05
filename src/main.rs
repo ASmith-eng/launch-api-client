@@ -18,13 +18,13 @@ use api::client::Ll2Client;
 use api::rate_limiter::RateLimiter;
 use cache::CacheManager;
 use clock::{Clock, SystemClock};
-use config::{load_config, AppDirs};
-use vendor::launch_library_2::endpoints::PROD_BASE_URL;
+use config::{AppDirs, load_config};
 use models::{AppState, CACHE_VERSION};
 use tui::app::{App, AppScreen};
 use tui::event::run_event_loop;
 use tui::filter::FilterState;
 use tui::terminal::{install_panic_hook, setup_terminal};
+use vendor::launch_library_2::endpoints::PROD_BASE_URL;
 
 #[tokio::main]
 async fn main() {
@@ -89,10 +89,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Maybe prune detail cache.
     if cache::should_prune(app_state.startup_count, &config.cache) {
-        info!(
-            "running cache pruning (startup #{})",
-            app_state.startup_count
-        );
+        info!("running cache pruning (startup #{})", app_state.startup_count);
         if let Err(e) = cache_manager.prune_details(&config.cache).await {
             warn!(error = %e, "cache pruning failed");
         }
@@ -158,13 +155,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Derive the page the cache represents. If launches_per_page has
             // changed since the cache was written the offset won't divide
             // evenly — fall back to page 0 in that case.
-            let restored_page = if app.launches_per_page > 0
-                && cache.page_offset % app.launches_per_page == 0
-            {
-                cache.page_offset / app.launches_per_page
-            } else {
-                0
-            };
+            let restored_page =
+                if app.launches_per_page > 0 && cache.page_offset % app.launches_per_page == 0 {
+                    cache.page_offset / app.launches_per_page
+                } else {
+                    0
+                };
 
             info!(
                 count = cache.launches.len(),

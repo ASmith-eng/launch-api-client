@@ -299,11 +299,7 @@ impl<C: Clock> Ll2Client<C> {
     #[cfg(test)]
     pub async fn fetch_throttle_status(&self) -> Result<ThrottleStatus, AppError> {
         let status = self.fetch_throttle_raw().await?;
-        debug!(
-            remaining = status.remaining,
-            limit = status.limit,
-            "throttle sync complete"
-        );
+        debug!(remaining = status.remaining, limit = status.limit, "throttle sync complete");
 
         let mut limiter = self.rate_limiter.lock().await;
         limiter.record_sync(status.remaining, status.limit);
@@ -573,10 +569,7 @@ mod tests {
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
         assert_eq!(detail.provider_total_launches, Some(301));
         assert_eq!(detail.provider_successful_launches, Some(295));
-        assert_eq!(
-            detail.rocket_full_name.as_deref(),
-            Some("Starship (Super Heavy + Starship)")
-        );
+        assert_eq!(detail.rocket_full_name.as_deref(), Some("Starship (Super Heavy + Starship)"));
         assert_eq!(detail.vid_urls.len(), 1);
         assert_eq!(detail.info_urls.len(), 1);
         assert_eq!(detail.programs, vec!["Starship Development"]);
@@ -670,24 +663,15 @@ mod tests {
     #[test]
     fn ident_is_logged_verbatim_when_unauthenticated() {
         assert_eq!(ident_for_log(None, Some("88.97.214.56")), "88.97.214.56");
-        assert_eq!(
-            ident_for_log(Some(""), Some("88.97.214.56")),
-            "88.97.214.56"
-        );
+        assert_eq!(ident_for_log(Some(""), Some("88.97.214.56")), "88.97.214.56");
     }
 
     #[test]
     fn ident_is_masked_when_it_could_be_the_api_key() {
         // LL2 echoes the key back as `ident` for authenticated clients, so the
         // masking must hold whatever the server sends — including an IP.
-        assert_eq!(
-            ident_for_log(Some("secret-key"), Some("secret-key")),
-            "<api key>"
-        );
-        assert_eq!(
-            ident_for_log(Some("secret-key"), Some("88.97.214.56")),
-            "<api key>"
-        );
+        assert_eq!(ident_for_log(Some("secret-key"), Some("secret-key")), "<api key>");
+        assert_eq!(ident_for_log(Some("secret-key"), Some("88.97.214.56")), "<api key>");
         assert_eq!(ident_for_log(Some("secret-key"), None), "<api key>");
     }
 
@@ -1046,10 +1030,7 @@ mod tests {
 
         // If any query param doesn't match, wiremock returns 404.
         let result = client.fetch_launch_list(&params).await;
-        assert!(
-            result.is_ok(),
-            "query params should match wiremock expectations"
-        );
+        assert!(result.is_ok(), "query params should match wiremock expectations");
     }
 
     // --- Startup throttle sync tests ---
@@ -1136,10 +1117,7 @@ mod tests {
         let client = Ll2Client::new("http://unused".into(), None, limiter).unwrap();
 
         for i in 0..REQUEST_CAP {
-            assert!(
-                client.check_request_cap().await.is_ok(),
-                "request {i} should be allowed"
-            );
+            assert!(client.check_request_cap().await.is_ok(), "request {i} should be allowed");
         }
     }
 

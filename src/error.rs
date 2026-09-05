@@ -38,10 +38,7 @@ impl AppError {
     pub fn is_retryable(&self) -> bool {
         match self {
             AppError::Network(e) => {
-                e.is_timeout()
-                    || e.is_connect()
-                    || e.status()
-                        .is_some_and(|s| s.is_server_error())
+                e.is_timeout() || e.is_connect() || e.status().is_some_and(|s| s.is_server_error())
             }
             AppError::ApiError { status, .. } => (500..=599).contains(status),
             _ => false,
@@ -119,10 +116,8 @@ mod tests {
 
     #[test]
     fn cache_io_is_not_retryable() {
-        let err = AppError::CacheIo(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
+        let err =
+            AppError::CacheIo(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         assert!(!err.is_retryable());
     }
 
@@ -173,10 +168,8 @@ mod tests {
 
     #[test]
     fn cache_io_is_not_offline_signal() {
-        let err = AppError::CacheIo(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
+        let err =
+            AppError::CacheIo(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         assert!(!err.is_offline_signal());
     }
 
@@ -263,14 +256,9 @@ mod tests {
 
     #[test]
     fn cache_io_and_io_are_distinct() {
-        let cache_err = AppError::CacheIo(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "missing",
-        ));
-        let io_err = AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "missing",
-        ));
+        let cache_err =
+            AppError::CacheIo(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+        let io_err = AppError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
         // They should have different Display prefixes.
         assert!(cache_err.to_string().starts_with("Cache I/O"));
         assert!(io_err.to_string().starts_with("I/O error"));

@@ -92,10 +92,7 @@ fn build_stale_line(app: &App, fetched_at: chrono::DateTime<chrono::Utc>) -> Lin
     let dim = Style::default().fg(Color::DarkGray);
     let updated = staleness_text(app, fetched_at);
 
-    Line::from(Span::styled(
-        format!("  {updated} (stale) • Press 'r' to refresh"),
-        dim,
-    ))
+    Line::from(Span::styled(format!("  {updated} (stale) • Press 'r' to refresh"), dim))
 }
 
 /// Build the status line for fresh cache.
@@ -118,10 +115,7 @@ fn build_fresh_line(
 ///
 /// - `"relative"` → `"Updated 5m ago"`
 /// - `"absolute"` → `"Last updated 10:40 AM UTC"`
-fn staleness_text(
-    app: &App,
-    fetched_at: chrono::DateTime<chrono::Utc>,
-) -> String {
+fn staleness_text(app: &App, fetched_at: chrono::DateTime<chrono::Utc>) -> String {
     match app.ui_config.staleness_style {
         StalenessStyle::Absolute => {
             let time_str = time_fmt::format_time_of_day(&fetched_at, app.ui_config.time_format);
@@ -137,12 +131,12 @@ fn staleness_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
     use crate::cache::CacheStrategy;
     use crate::config::TimeFormat;
-    use crate::models::{LaunchDetailCache, CACHE_VERSION};
     use crate::models::tests::dummy_launch_detail;
+    use crate::models::{CACHE_VERSION, LaunchDetailCache};
     use crate::tui::app::App;
+    use chrono::Duration;
 
     fn app_with_cache(fetched_ago_mins: i64, expires_in_mins: i64) -> App {
         let now = Utc::now();

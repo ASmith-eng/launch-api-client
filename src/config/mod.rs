@@ -133,7 +133,6 @@ pub struct LogConfig {
 // Defaults
 // ---------------------------------------------------------------------------
 
-
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
@@ -197,11 +196,35 @@ impl CacheConfig {
         let defaults = Self::default();
 
         // TTL values: must be 1–43 200 (30 days)
-        sanitize_range("ttl_far_future", &mut self.ttl_far_future, 1, MAX_TTL_MINUTES, defaults.ttl_far_future);
-        sanitize_range("ttl_near_future", &mut self.ttl_near_future, 1, MAX_TTL_MINUTES, defaults.ttl_near_future);
-        sanitize_range("ttl_imminent", &mut self.ttl_imminent, 1, MAX_TTL_MINUTES, defaults.ttl_imminent);
+        sanitize_range(
+            "ttl_far_future",
+            &mut self.ttl_far_future,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_far_future,
+        );
+        sanitize_range(
+            "ttl_near_future",
+            &mut self.ttl_near_future,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_near_future,
+        );
+        sanitize_range(
+            "ttl_imminent",
+            &mut self.ttl_imminent,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_imminent,
+        );
         sanitize_range("ttl_active", &mut self.ttl_active, 1, MAX_TTL_MINUTES, defaults.ttl_active);
-        sanitize_range("ttl_launch_list", &mut self.ttl_launch_list, 1, MAX_TTL_MINUTES, defaults.ttl_launch_list);
+        sanitize_range(
+            "ttl_launch_list",
+            &mut self.ttl_launch_list,
+            1,
+            MAX_TTL_MINUTES,
+            defaults.ttl_launch_list,
+        );
 
         // Pruning: age and count have a minimum of 1, no enforced max
         sanitize_min_u32(
@@ -581,7 +604,10 @@ prune_every_n_startups = 51
         .unwrap();
 
         let config = load_config(&path);
-        assert_eq!(config.cache.prune_every_n_startups, CacheConfig::default().prune_every_n_startups);
+        assert_eq!(
+            config.cache.prune_every_n_startups,
+            CacheConfig::default().prune_every_n_startups
+        );
     }
 
     #[test]

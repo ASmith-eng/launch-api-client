@@ -66,28 +66,19 @@ mod tests {
 
     #[test]
     fn region_with_no_ids_is_none_registered() {
-        assert_eq!(
-            sites_from_ids(RegionFilter::Europe, &[]),
-            RegionSites::NoneRegistered
-        );
+        assert_eq!(sites_from_ids(RegionFilter::Europe, &[]), RegionSites::NoneRegistered);
     }
 
     /// `All` is empty for the opposite reason, and must not be mistaken for a
     /// region the provider has no sites in.
     #[test]
     fn all_stays_unfiltered_when_ids_are_empty() {
-        assert_eq!(
-            sites_from_ids(RegionFilter::All, &[]),
-            RegionSites::Unfiltered
-        );
+        assert_eq!(sites_from_ids(RegionFilter::All, &[]), RegionSites::Unfiltered);
     }
 
     #[test]
     fn single_site_region_has_no_separator() {
-        assert_eq!(
-            resolve(RegionFilter::India),
-            RegionSites::Sites("14".to_string())
-        );
+        assert_eq!(resolve(RegionFilter::India), RegionSites::Sites("14".to_string()));
     }
 
     #[test]
@@ -125,11 +116,7 @@ mod tests {
         for region in filterable() {
             for id in table::location_ids(region) {
                 if let Some(other) = seen.insert(*id, region) {
-                    panic!(
-                        "location {id} is in both {} and {}",
-                        label(other),
-                        label(region)
-                    );
+                    panic!("location {id} is in both {} and {}", label(other), label(region));
                 }
             }
         }

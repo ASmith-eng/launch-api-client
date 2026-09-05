@@ -156,7 +156,11 @@ pub struct Ll2NetPrecision {
 #[derive(Debug, Deserialize)]
 pub struct Ll2Provider {
     pub name: String,
-    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "string_or_named_object::deserialize"
+    )]
     pub provider_type: Option<String>,
 }
 
@@ -192,7 +196,11 @@ pub struct Ll2Country {
 #[derive(Debug, Deserialize)]
 pub struct Ll2Mission {
     pub name: String,
-    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "string_or_named_object::deserialize"
+    )]
     pub mission_type: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -259,7 +267,11 @@ pub struct Ll2LaunchDetail {
 #[derive(Debug, Deserialize)]
 pub struct Ll2ProviderDetail {
     pub name: String,
-    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "string_or_named_object::deserialize"
+    )]
     pub provider_type: Option<String>,
     #[serde(default)]
     pub total_launch_count: Option<u32>,
@@ -414,7 +426,11 @@ pub struct Ll2LaunchUpdate {
 #[derive(Debug, Deserialize)]
 pub struct Ll2MissionDetail {
     pub name: String,
-    #[serde(rename = "type", default, deserialize_with = "string_or_named_object::deserialize")]
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "string_or_named_object::deserialize"
+    )]
     pub mission_type: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
@@ -492,10 +508,7 @@ mod tests {
         assert_eq!(launch.status.id, 1);
         assert_eq!(launch.status.abbrev, "Go");
         assert_eq!(launch.launch_service_provider.name, "SpaceX");
-        assert_eq!(
-            launch.launch_service_provider.provider_type.as_deref(),
-            Some("Commercial")
-        );
+        assert_eq!(launch.launch_service_provider.provider_type.as_deref(), Some("Commercial"));
         assert_eq!(launch.pad.location.name, "Starbase, Texas");
 
         let mission = launch.mission.as_ref().unwrap();
@@ -538,18 +551,12 @@ mod tests {
         assert_eq!(detail.status.id, 1);
         assert_eq!(detail.probability, Some(90));
         assert_eq!(detail.weather_concerns.as_deref(), Some("No concerns"));
-        assert_eq!(
-            detail.image.as_deref(),
-            Some("https://example.com/starship.jpg")
-        );
+        assert_eq!(detail.image.as_deref(), Some("https://example.com/starship.jpg"));
 
         // Provider with launch stats
         assert_eq!(detail.launch_service_provider.name, "SpaceX");
         assert_eq!(detail.launch_service_provider.total_launch_count, Some(301));
-        assert_eq!(
-            detail.launch_service_provider.successful_launches,
-            Some(295)
-        );
+        assert_eq!(detail.launch_service_provider.successful_launches, Some(295));
         assert_eq!(detail.launch_service_provider.failed_launches, Some(6));
 
         // Rocket
@@ -560,10 +567,7 @@ mod tests {
             .configuration
             .as_ref()
             .unwrap();
-        assert_eq!(
-            config.full_name.as_deref(),
-            Some("Starship (Super Heavy + Starship)")
-        );
+        assert_eq!(config.full_name.as_deref(), Some("Starship (Super Heavy + Starship)"));
 
         // Mission
         let mission = detail.mission.as_ref().unwrap();
@@ -698,10 +702,7 @@ mod tests {
         }"#;
 
         let launch: Ll2Launch = serde_json::from_str(json).expect("should handle object type");
-        assert_eq!(
-            launch.launch_service_provider.provider_type.as_deref(),
-            Some("Commercial")
-        );
+        assert_eq!(launch.launch_service_provider.provider_type.as_deref(), Some("Commercial"));
     }
 
     #[test]
@@ -759,18 +760,9 @@ mod tests {
 
         let detail: Ll2LaunchDetail =
             serde_json::from_str(json).expect("should handle object types in detail");
-        assert_eq!(
-            detail.launch_service_provider.provider_type.as_deref(),
-            Some("Commercial")
-        );
-        assert_eq!(
-            detail.image.as_deref(),
-            Some("https://example.com/starship.jpg")
-        );
-        assert_eq!(
-            detail.mission.unwrap().mission_type.as_deref(),
-            Some("Communications")
-        );
+        assert_eq!(detail.launch_service_provider.provider_type.as_deref(), Some("Commercial"));
+        assert_eq!(detail.image.as_deref(), Some("https://example.com/starship.jpg"));
+        assert_eq!(detail.mission.unwrap().mission_type.as_deref(), Some("Communications"));
     }
 
     #[test]
@@ -787,10 +779,7 @@ mod tests {
 
         let detail: Ll2LaunchDetail =
             serde_json::from_str(json).expect("should handle string image");
-        assert_eq!(
-            detail.image.as_deref(),
-            Some("https://example.com/image.jpg")
-        );
+        assert_eq!(detail.image.as_deref(), Some("https://example.com/image.jpg"));
     }
 
     #[test]
@@ -819,7 +808,10 @@ mod tests {
         assert!(landing.attempt);
         assert_eq!(landing.success, Some(true));
         assert_eq!(
-            landing.landing_type.as_ref().and_then(|t| t.abbrev.as_deref()),
+            landing
+                .landing_type
+                .as_ref()
+                .and_then(|t| t.abbrev.as_deref()),
             Some("ASDS")
         );
         assert_eq!(
@@ -834,7 +826,10 @@ mod tests {
         assert!(rocket.spacecraft_stage.is_empty());
 
         // Configuration specs — the headline numbers shown in the Vehicle box.
-        let config = rocket.configuration.as_ref().expect("configuration present");
+        let config = rocket
+            .configuration
+            .as_ref()
+            .expect("configuration present");
         assert_eq!(config.variant.as_deref(), Some("Block 5"));
         assert_eq!(config.length, Some(70.0));
         assert_eq!(config.diameter, Some(3.65));
@@ -876,14 +871,8 @@ mod tests {
         let first = &crew[0];
         let astronaut = first.astronaut.as_ref().expect("astronaut present");
         assert_eq!(astronaut.name, "Pyotr Dubrov");
-        assert_eq!(
-            first.role.as_ref().and_then(|r| r.role.as_deref()),
-            Some("Commander")
-        );
-        assert_eq!(
-            astronaut.agency.as_ref().and_then(|a| a.abbrev.as_deref()),
-            Some("RFSA")
-        );
+        assert_eq!(first.role.as_ref().and_then(|r| r.role.as_deref()), Some("Commander"));
+        assert_eq!(astronaut.agency.as_ref().and_then(|a| a.abbrev.as_deref()), Some("RFSA"));
     }
 
     /// All Step 2 fields are optional / `#[serde(default)]` — a minimal
@@ -904,10 +893,12 @@ mod tests {
         assert!(detail.updates.is_empty());
         assert!(detail.launch_service_provider.country.is_empty());
         assert!(detail.launch_service_provider.founding_year.is_none());
-        assert!(detail
-            .launch_service_provider
-            .consecutive_successful_launches
-            .is_none());
+        assert!(
+            detail
+                .launch_service_provider
+                .consecutive_successful_launches
+                .is_none()
+        );
         assert!(detail.pad.total_launch_count.is_none());
     }
 
@@ -923,8 +914,7 @@ mod tests {
             "image": null
         }"#;
 
-        let detail: Ll2LaunchDetail =
-            serde_json::from_str(json).expect("should handle null image");
+        let detail: Ll2LaunchDetail = serde_json::from_str(json).expect("should handle null image");
         assert!(detail.image.is_none());
     }
 }

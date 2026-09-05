@@ -24,7 +24,7 @@ use std::time::Duration;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use tokio::signal;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::debug;
 
 use crate::api::client::Ll2Client;
@@ -34,8 +34,8 @@ use crate::config::CacheConfig;
 use crate::error::AppError;
 use crate::tui::app::{App, AppScreen};
 use crate::tui::fetch::{
-    check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors, handle_fetch_result,
-    maybe_load_detail_from_disk, spawn_fetch, FetchResult,
+    FetchResult, check_needs_fetch, check_needs_throttle_sync, dismiss_expired_errors,
+    handle_fetch_result, maybe_load_detail_from_disk, spawn_fetch,
 };
 use crate::tui::keys::handle_key;
 use crate::tui::render::render;

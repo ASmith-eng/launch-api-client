@@ -102,7 +102,8 @@ fn handle_list_key(app: &mut App, key: KeyEvent) {
 fn navigate_page(app: &mut App, target_page: u32) {
     // Stash the current page before leaving it (skip if empty — nothing to save).
     if !app.launches.is_empty() {
-        app.page_cache.insert(app.current_page, app.launches.clone());
+        app.page_cache
+            .insert(app.current_page, app.launches.clone());
     }
 
     app.current_page = target_page;
@@ -231,8 +232,15 @@ mod tests {
             net_precision: None,
             window_start: None,
             window_end: None,
-            status: LaunchStatus { id: 1, name: "Go".into(), abbrev: "Go".into() },
-            launch_service_provider: Provider { name: "SpaceX".into(), provider_type: None },
+            status: LaunchStatus {
+                id: 1,
+                name: "Go".into(),
+                abbrev: "Go".into(),
+            },
+            launch_service_provider: Provider {
+                name: "SpaceX".into(),
+                provider_type: None,
+            },
             pad: PadInfo {
                 name: None,
                 location: LocationInfo {
@@ -269,7 +277,8 @@ mod tests {
         app.total_count = 50;
         app.current_page = 0;
         app.launches = vec![sample_launch("page0")];
-        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+        app.page_cache
+            .insert(1, vec![sample_launch("page1-cached")]);
 
         handle_key(&mut app, press(KeyCode::Char('n')));
 
@@ -325,7 +334,8 @@ mod tests {
         app.total_count = 75;
         app.current_page = 2;
         app.launches = vec![sample_launch("page2")];
-        app.page_cache.insert(1, vec![sample_launch("page1-cached")]);
+        app.page_cache
+            .insert(1, vec![sample_launch("page1-cached")]);
 
         handle_key(&mut app, press(KeyCode::Char('p')));
 
@@ -446,10 +456,7 @@ mod tests {
             handle_key(&mut app, press(KeyCode::Down));
         }
 
-        assert_eq!(
-            app.detail_scroll_offset, 3,
-            "offset must saturate at max, not wind up"
-        );
+        assert_eq!(app.detail_scroll_offset, 3, "offset must saturate at max, not wind up");
     }
 
     #[test]
@@ -510,10 +517,7 @@ mod tests {
         ] {
             let mut app = splash_app();
             handle_key(&mut app, press(code));
-            assert!(
-                matches!(app.screen, AppScreen::List),
-                "{code:?} did not dismiss the splash"
-            );
+            assert!(matches!(app.screen, AppScreen::List), "{code:?} did not dismiss the splash");
         }
     }
 

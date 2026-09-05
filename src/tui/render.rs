@@ -76,9 +76,7 @@ fn render_size_warning(frame: &mut ratatui::Frame, area: Rect) {
         Line::raw(""),
         Line::raw("  Terminal window too small."),
         Line::raw(""),
-        Line::raw(format!(
-            "  Please resize to at least {MIN_COLS}x{MIN_ROWS}"
-        )),
+        Line::raw(format!("  Please resize to at least {MIN_COLS}x{MIN_ROWS}")),
         Line::raw("  to start seeing rockets!"),
         Line::raw(""),
     ]);
@@ -100,10 +98,7 @@ fn render_error(frame: &mut ratatui::Frame, area: Rect, error_state: &ErrorState
     let msg = match error_state {
         ErrorState::Transient { message, .. } => format!("Error: {message}"),
         ErrorState::RateLimited { available_at } => {
-            format!(
-                "Rate limited — resets at {}",
-                available_at.format("%H:%M:%S UTC")
-            )
+            format!("Rate limited — resets at {}", available_at.format("%H:%M:%S UTC"))
         }
         ErrorState::Offline => "Network offline".to_string(),
         ErrorState::RequestCapExceeded => {

@@ -23,7 +23,7 @@ use crate::cache::{self, CacheManager, CacheStrategy};
 use crate::clock::Clock;
 use crate::config::CacheConfig;
 use crate::error::{AppError, ErrorState};
-use crate::models::{LaunchDetailCache, LaunchListCache, CACHE_VERSION};
+use crate::models::{CACHE_VERSION, LaunchDetailCache, LaunchListCache};
 use crate::tui::app::{App, AppScreen};
 use crate::vendor::launch_library_2::endpoints::ListParams;
 
@@ -177,10 +177,7 @@ fn check_refresh(app: &App) -> Option<FetchKind> {
 
 /// Whether the active screen is the (filterable) launch list.
 fn list_screen(screen: &AppScreen) -> bool {
-    matches!(
-        active_screen(screen),
-        AppScreen::List | AppScreen::Splash { .. }
-    )
+    matches!(active_screen(screen), AppScreen::List | AppScreen::Splash { .. })
 }
 
 /// Resolve the "real" screen when a help overlay is active.
