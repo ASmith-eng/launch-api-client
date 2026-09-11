@@ -82,10 +82,11 @@ jobs:
             runner: macos-14
             binary: deltav
             archive: tar.gz
-          - target: x86_64-apple-darwin
-            runner: macos-13
-            binary: deltav
-            archive: tar.gz
+          # Commenting intel mac build as github currently has trouble finding runners on macos-13
+          # - target: x86_64-apple-darwin
+          #   runner: macos-13
+          #   binary: deltav
+          #   archive: tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             binary: deltav.exe
@@ -154,7 +155,6 @@ jobs:
             |----------|------|
             | Linux (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
             | macOS (Apple Silicon) | `launch-client-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
-            | macOS (Intel) | `launch-client-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz` |
             | Windows (x86_64) | `launch-client-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
 
             ### Usage
